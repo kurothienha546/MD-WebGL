@@ -11,42 +11,31 @@ import { useSliderStore } from "@/store/useSliderStore";
 
 export default function Home() {
   const activeIndex = useSliderStore((state) => state.activeIndex);
-  const lbOpen = useSliderStore((state) => state.lbOpen);
   const snapRef = useRef<number | null>(null);
   const lightbox = useLightboxAnimation(snapRef);
 
   useEffect(() => {
-    const addHover = (sel: string) => {
-      const targets = document.querySelectorAll(sel);
-      const onEnter = () => {
-        if (lbOpen) return;
-        document.getElementById("cursor")?.classList.add("hover");
-      };
-      const onLeave = () => {
-        document.getElementById("cursor")?.classList.remove("hover");
-      };
-
-      targets.forEach((el) => {
-        el.addEventListener("mouseenter", onEnter);
-        el.addEventListener("mouseleave", onLeave);
-      });
-
-      return () => {
-        targets.forEach((el) => {
-          el.removeEventListener("mouseenter", onEnter);
-          el.removeEventListener("mouseleave", onLeave);
-        });
-      };
+    const onOver = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement | null)?.closest("nav a, #lightbox-close");
+      if (!target) return;
+      if (useSliderStore.getState().lbOpen && target.id !== "lightbox-close") return;
+      document.getElementById("cursor")?.classList.add("hover");
     };
 
-    const cleanupNav = addHover("nav a");
-    const cleanupClose = addHover("#lightbox-close");
+    const onOut = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement | null)?.closest("nav a, #lightbox-close");
+      if (!target) return;
+      document.getElementById("cursor")?.classList.remove("hover");
+    };
+
+    window.addEventListener("mouseover", onOver);
+    window.addEventListener("mouseout", onOut);
 
     return () => {
-      cleanupNav?.();
-      cleanupClose?.();
+      window.removeEventListener("mouseover", onOver);
+      window.removeEventListener("mouseout", onOut);
     };
-  }, [lbOpen]);
+  }, []);
 
   return (
     <main className="relative w-full h-screen overflow-hidden bg-bg">

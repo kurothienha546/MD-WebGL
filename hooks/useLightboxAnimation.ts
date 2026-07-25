@@ -49,19 +49,8 @@ interface GalleryRect {
 const asElements = (...nodes: Array<HTMLElement | null>): HTMLElement[] =>
   nodes.filter((node): node is HTMLElement => node !== null);
 
-/** Cached scrollbar width — recomputed on resize, not on every open(). */
-let cachedScrollbarWidth: number | null = null;
-const getScrollbarWidth = () => {
-  if (cachedScrollbarWidth === null) {
-    cachedScrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-  }
-  return cachedScrollbarWidth;
-};
-if (typeof window !== "undefined") {
-  window.addEventListener("resize", () => {
-    cachedScrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-  });
-}
+const getScrollbarWidth = () =>
+  typeof window !== "undefined" ? window.innerWidth - document.documentElement.clientWidth : 0;
 
 export interface UseLightboxAnimationResult {
   lightboxRef: MutableRefObject<HTMLDivElement | null>;
@@ -243,9 +232,14 @@ export function useLightboxAnimation(
   }, []);
 
   const readGalleryOffset = useCallback((index: number): number | null => {
-    const wrap = document.querySelector<HTMLDivElement>(`.image-wrap[data-work-index="${index}"]`);
-    if (!wrap) return null;
-    return wrap.getBoundingClientRect().left - wrap.offsetLeft - window.innerWidth / 2;
+    const wrap = document.querySelector<HTMLDivElement>(
+      `.image-wrap[data-work-index="${index}"]`,
+    );
+    const first = document.querySelector<HTMLDivElement>(
+      `.image-wrap[data-work-index="0"]`,
+    );
+    if (!wrap || !first) return null;
+    return -(wrap.offsetLeft + first.offsetWidth / 2);
   }, []);
 
   const writeInfo = useCallback((index: number) => {
@@ -296,26 +290,24 @@ export function useLightboxAnimation(
     gsap.set(closeRef.current, { autoAlpha: 0, y: 10 });
   }, []);
 
-  const settleUI = useCallback(() => {
-    const text = asElements(titleRef.current, labelRef.current, counterRef.current);
-    const crosses = asElements(crossLeftRef.current, crossRightRef.current);
+  const settleGeometry = useCallback(() => {
     const lightbox = lightboxRef.current;
     const frontId = frontIdRef.current;
-    const frontImg = frontId !== null ? slideDomRef.current.get(frontId)?.img ?? null : null;
+    const frontImg =
+      frontId !== null ? slideDomRef.current.get(frontId)?.img ?? null : null;
 
     if (lightbox) {
-      gsap.set(lightbox, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+      gsap.set(lightbox, {
+        left: 0,
+        top: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
     }
     if (frontImg) {
       gsap.set(frontImg, { objectPosition: "50% 50%", x: 0, y: 0 });
     }
-
-    writeInfo(currentIndexRef.current);
-    gsap.set(overlayRef.current, { autoAlpha: 1 });
-    gsap.set(text, { autoAlpha: 1, y: 0 });
-    gsap.set(crosses, { autoAlpha: 1, yPercent: -50, scale: 1 });
-    gsap.set(closeRef.current, { autoAlpha: 1, y: 0 });
-  }, [writeInfo]);
+  }, []);
 
   const syncGalleryToIndex = useCallback(
     (index: number, offset?: number | null) => {
@@ -630,13 +622,23 @@ export function useLightboxAnimation(
 
     syncGalleryToIndex(index, restoreOffsetRef.current);
 
+    // === FIX #3: Reset mọi clip-path/transform đang lửng lơ trước khi close ===
+    const allSlides = Array.from(slideDomRef.current.values());
+    allSlides.forEach(({ wrap, img }) => {
+      if (wrap) gsap.set(wrap, { clipPath: FULL_CLIP });
+      if (img) gsap.set(img, { x: 0, y: 0, objectPosition: "50% 50%" });
+    });
+    // ================================================================
+
     const destination = readGalleryItem(index);
 
     if (trackEl) {
       gsap.set(trackEl, { scale: 0.85 });
     }
 
-    settleUI();
+    // === FIX #1: Chỉ set geometry, không đụng opacity ===
+    settleGeometry();
+    // ===================================================
 
     stopUI();
     const allSlideEls = Array.from(slideDomRef.current.values()).flatMap((d) => asElements(d.wrap, d.img));
@@ -698,7 +700,14 @@ export function useLightboxAnimation(
         0.1,
       );
     }
-  }, [readGalleryItem, resetVisuals, setLbOpen, settleUI, stopUI, syncGalleryToIndex]);
+  }, [
+    readGalleryItem,
+    resetVisuals,
+    setLbOpen,
+    settleGeometry,
+    stopUI,
+    syncGalleryToIndex,
+  ]);
 
   // One-time visual reset on mount; gsap.context handles teardown on unmount.
   useLayoutEffect(() => {

@@ -167,7 +167,7 @@ export function useGalleryAnimation(
   const isInViewRef = useRef(true);
   const motionActiveRef = useRef(false);
 
-  const tickRef = useRef<() => void>(() => {});
+  const tickRef = useRef<() => void>(() => { });
   const stableTickRef = useRef(() => tickRef.current());
 
   const setActive = useCallback(
@@ -546,10 +546,8 @@ export function useGalleryAnimation(
     if (previousLbOpenRef.current === lbOpen) return;
     previousLbOpenRef.current = lbOpen;
 
-    if (lbOpen) {
-      dragRef.current = null;
-      stopMotion();
-    }
+    dragRef.current = null;
+    stopMotion();
 
     const crosshair = crosshairRef.current;
     const track = trackRef.current;

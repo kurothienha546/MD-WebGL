@@ -42,7 +42,13 @@ export function useFocusTrap(
 
       const focusable = Array.from(
         container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      ).filter(
+        (el) =>
+          el === document.activeElement ||
+          el.offsetWidth > 0 ||
+          el.offsetHeight > 0 ||
+          el.getClientRects().length > 0,
+      );
 
       if (focusable.length === 0) {
         event.preventDefault();

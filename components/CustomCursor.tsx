@@ -24,6 +24,7 @@ export default function CustomCursor() {
   return (
     <div
       ref={ref}
+      id="cursor"
       className="fixed top-0 left-0 w-[12px] h-[12px] rounded-full pointer-events-none z-[9999] 
                  -translate-x-1/2 -translate-y-1/2 mix-blend-difference max-md:hidden
                  bg-[#E8D5B7] shadow-[0_0_20px_rgba(232,213,183,0.4),0_0_60px_rgba(232,213,183,0.1)]"
