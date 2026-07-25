@@ -5,6 +5,7 @@ import { works } from "@/lib/works";
 import { useGalleryAnimation } from "@/hooks/useGalleryAnimation";
 
 interface GalleryProps {
+  snapRef: MutableRefObject<number | null>;
   openLightbox?: (index: number) => void;
   /**
    * Optional ref to the global custom-cursor element. When omitted, falls
@@ -13,7 +14,7 @@ interface GalleryProps {
   cursorRef?: RefObject<HTMLElement | null>;
 }
 
-export default function Gallery({ openLightbox, cursorRef }: GalleryProps) {
+export default function Gallery({ snapRef, openLightbox, cursorRef }: GalleryProps) {
   const {
     galleryRef,
     trackRef,
@@ -26,7 +27,7 @@ export default function Gallery({ openLightbox, cursorRef }: GalleryProps) {
     handleWrapMouseEnter,
     handleWrapMouseLeave,
     handleWrapKeyDown,
-  } = useGalleryAnimation(cursorRef, openLightbox);
+  } = useGalleryAnimation(snapRef, cursorRef, openLightbox);
 
   return (
     <div ref={galleryRef} className="contents">

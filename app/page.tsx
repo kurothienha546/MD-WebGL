@@ -12,7 +12,8 @@ import { useSliderStore } from "@/store/useSliderStore";
 export default function Home() {
   const activeIndex = useSliderStore((state) => state.activeIndex);
   const lbOpen = useSliderStore((state) => state.lbOpen);
-  const lightbox = useLightboxAnimation();
+  const snapRef = useRef<number | null>(null);
+  const lightbox = useLightboxAnimation(snapRef);
 
   useEffect(() => {
     const addHover = (sel: string) => {
@@ -51,7 +52,7 @@ export default function Home() {
     <main className="relative w-full h-screen overflow-hidden bg-bg">
       <CustomCursor />
       <Header />
-      <Gallery openLightbox={lightbox.openLightbox} />
+      <Gallery snapRef={snapRef} openLightbox={lightbox.openLightbox} />
       <DragHint />
       <Footer activeIndex={activeIndex} />
       <Lightbox animation={lightbox} />

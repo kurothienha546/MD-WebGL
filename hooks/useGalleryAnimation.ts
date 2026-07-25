@@ -20,8 +20,8 @@ const CLICK_DISTANCE_THRESHOLD_PX = 6;
 const WHEEL_MULTIPLIER = 0.6;
 /** Below this distance-to-target, the per-frame chase snaps to exact value. */
 const SETTLE_EPSILON_PX = 0.08;
-const IDLE_EASE = 0.08;
-const DRAG_EASE = 0.18;
+const IDLE_EASE = 0.04;
+const DRAG_EASE = 0.01;
 
 const RESIZE_DEBOUNCE_MS = 100;
 
@@ -103,6 +103,7 @@ export interface UseGalleryAnimationResult {
  * returns.
  */
 export function useGalleryAnimation(
+  snapRef: MutableRefObject<number | null>,
   cursorRef?: RefObject<HTMLElement | null>,
   openLightbox?: (index: number) => void,
 ): UseGalleryAnimationResult {
@@ -160,7 +161,6 @@ export function useGalleryAnimation(
   const activeIndexRef = useRef(useSliderStore.getState().activeIndex);
   const hasMeasuredRef = useRef(false);
   const dragRef = useRef<DragState | null>(null);
-  const preOpenOffsetRef = useRef<number | null>(null);
   const entranceTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const previousLbOpenRef = useRef(lbOpen);
   const initiallyOpenRef = useRef(lbOpen);
@@ -257,6 +257,18 @@ export function useGalleryAnimation(
       setActive(nearestIndex);
     },
     [clampOffset, setActive],
+  );
+
+  const syncMotionToOffset = useCallback(
+    (offset: number) => {
+      const synchronizedOffset = clampOffset(offset);
+      stopMotion();
+      dragRef.current = null;
+      currentOffsetRef.current = synchronizedOffset;
+      targetOffsetRef.current = synchronizedOffset;
+      renderOffset(synchronizedOffset);
+    },
+    [clampOffset, renderOffset, stopMotion],
   );
 
   /**
@@ -514,23 +526,29 @@ export function useGalleryAnimation(
   }, [setMotionTarget]);
 
   useEffect(() => {
+    const onGallerySnap = (event: Event) => {
+      const detail = (event as CustomEvent<GallerySnapDetail>).detail;
+      if (!detail || !Number.isInteger(detail.index) || !works[detail.index]) return;
+
+      const requestedOffset =
+        typeof detail.offset === "number" ? detail.offset : metricsRef.current.centers[detail.index];
+      syncMotionToOffset(requestedOffset);
+      measureLayout(requestedOffset);
+      setActive(detail.index);
+      snapRef.current = null;
+    };
+
+    window.addEventListener(GALLERY_SNAP_EVENT, onGallerySnap);
+    return () => window.removeEventListener(GALLERY_SNAP_EVENT, onGallerySnap);
+  }, [measureLayout, setActive, snapRef, syncMotionToOffset]);
+
+  useEffect(() => {
     if (previousLbOpenRef.current === lbOpen) return;
     previousLbOpenRef.current = lbOpen;
 
     if (lbOpen) {
-      preOpenOffsetRef.current = currentOffsetRef.current;
       dragRef.current = null;
       stopMotion();
-    } else {
-      const restoreOffset = preOpenOffsetRef.current;
-      if (restoreOffset !== null) {
-        const synchronizedOffset = clampOffset(restoreOffset);
-        dragRef.current = null;
-        stopMotion();
-        currentOffsetRef.current = synchronizedOffset;
-        targetOffsetRef.current = synchronizedOffset;
-        renderOffset(synchronizedOffset);
-      }
     }
 
     const crosshair = crosshairRef.current;
@@ -552,7 +570,7 @@ export function useGalleryAnimation(
         scale: lbOpen ? 0.85 : 1,
         opacity: lbOpen ? 0.25 : 1,
         duration: 0.94,
-        ease: "expo.inOut",
+        ease: "expo.out",
         transformOrigin: "50% 50%",
       });
     }
@@ -579,7 +597,7 @@ export function useGalleryAnimation(
           scale: Math.max(0.48, 1 - distance * SPATIAL_SHIFT_SCALE_STEP),
           opacity: SPATIAL_SHIFT_OPACITY,
           duration: SPATIAL_SHIFT_DURATION,
-          ease: "expo.inOut",
+          ease: "expo.out",
           transformOrigin: "50% 50%",
         });
         return;
@@ -603,7 +621,7 @@ export function useGalleryAnimation(
         scale: 1,
         opacity: 1,
         duration: SPATIAL_SHIFT_DURATION,
-        ease: "expo.inOut",
+        ease: "expo.out",
         clearProps: "transform",
       });
     });

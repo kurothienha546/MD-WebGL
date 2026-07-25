@@ -8,12 +8,14 @@ import {
   useState,
 } from "react";
 import type { MouseEvent, MutableRefObject } from "react";
+import { flushSync } from "react-dom";
 import gsap from "gsap";
 import { works } from "@/lib/works";
 import { useSliderStore } from "@/store/useSliderStore";
 import { useReducedMotion } from "./useReducedMotion";
 
-const EXPAND_EASE = "expo.inOut";
+const GALLERY_SNAP_EVENT = "gallery:snap-to-index";
+const EXPAND_EASE = "expo.out";
 const FULL_CLIP = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
 const MAX_STACKED_SLIDES = 3;
 /**
@@ -89,6 +91,7 @@ export interface UseLightboxAnimationResult {
  * that consumes this hook stays a plain render of whatever `slides` holds.
  */
 export function useLightboxAnimation(
+  snapRef: MutableRefObject<number | null>,
 ): UseLightboxAnimationResult {
   const lbOpen = useSliderStore((state) => state.lbOpen);
   const lbIndex = useSliderStore((state) => state.lbIndex);
@@ -117,23 +120,25 @@ export function useLightboxAnimation(
   const phaseRef = useRef<LightboxPhase>("idle");
   const currentIndexRef = useRef(lbIndex);
   const wasOpenRef = useRef(false);
-  const openSourceRectRef = useRef<GalleryRect | null>(null);
+  const restoreOffsetRef = useRef<number | null>(null);
   const frontIdRef = useRef<number | null>(null);
   const slideSeqRef = useRef(0);
   const slideDomRef = useRef<Map<number, SlideDom>>(new Map());
   const uiTimelineRef = useRef<gsap.core.Timeline | null>(null);
-  const openTimelineRef = useRef<gsap.core.Timeline | null>(null);
-  const slideTimelineRef = useRef<gsap.core.Timeline | null>(null);
-  const closeTimelineRef = useRef<gsap.core.Timeline | null>(null);
-  const openTimelineSeqRef = useRef(0);
-  const slideTimelineSeqRef = useRef(0);
-  const closeTimelineSeqRef = useRef(0);
-  const uiTimelineSeqRef = useRef(0);
+  /**
+   * Whichever timeline is currently animating the lightbox's own geometry
+   * (open's expand-from-source, or close's collapse-to-destination). Both
+   * openLightbox and closeLightbox kill this before creating their own —
+   * without that, interrupting an in-progress open with an immediate close
+   * (e.g. click, then Escape before the 0.94s expand finishes) leaves BOTH
+   * timelines animating left/top/width/height on the same element at once,
+   * and the older one's onComplete still fires and stomps phaseRef back to
+   * "open" mid-close. That's what was producing the wrong landing rect.
+   */
+  const mainTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const lastNavAtRef = useRef(0);
   const crossRotationRef = useRef<[number, number]>([0, 0]);
   const preloadedRef = useRef<Set<string>>(new Set());
-  const pendingOpenSlideRef = useRef<{ id: number; index: number } | null>(null);
-  const pendingSlideRef = useRef<{ id: number; index: number; oldId: number | null; direction: 1 | -1 } | null>(null);
 
   const wrapCallbacksRef = useRef(new Map<number, (node: HTMLDivElement | null) => void>());
   const imgCallbacksRef = useRef(new Map<number, (node: HTMLImageElement | null) => void>());
@@ -224,270 +229,6 @@ export function useLightboxAnimation(
     return timeline;
   }, [stopUI]);
 
-  const startOpenAnimation = useCallback(
-    (slideId: number, index: number) => {
-      const lightbox = lightboxRef.current;
-      const stage = stageRef.current;
-      const dom = slideDomRef.current.get(slideId);
-      const wrap = dom?.wrap ?? null;
-      const img = dom?.img ?? null;
-      if (!lightbox || !stage || !wrap || !img || !works[index]) return;
-
-      openTimelineSeqRef.current += 1;
-      const token = openTimelineSeqRef.current;
-      openTimelineRef.current?.kill();
-      stopUI();
-
-      const source = openSourceRectRef.current;
-      const rect = source?.rect;
-      const startLeft = rect?.left ?? 0;
-      const startTop = rect?.top ?? 0;
-      const startWidth = rect?.width ?? window.innerWidth;
-      const startHeight = rect?.height ?? window.innerHeight;
-      const startCrop = source?.objectPosition ?? "50% 50%";
-      const text = asElements(titleRef.current, labelRef.current, counterRef.current);
-      const crosses = asElements(crossLeftRef.current, crossRightRef.current);
-
-      preloadNeighbors(index);
-
-      const work = works[index];
-      if (work) {
-        if (titleRef.current) titleRef.current.textContent = work.title;
-        if (labelRef.current) labelRef.current.textContent = work.label;
-        if (counterRef.current) {
-          counterRef.current.textContent = `${String(index + 1).padStart(2, "0")} — ${String(
-            works.length,
-          ).padStart(2, "0")}`;
-        }
-      }
-
-      gsap.set(lightbox, {
-        autoAlpha: 1,
-        pointerEvents: "auto",
-        willChange: "left, top, width, height",
-        left: startLeft,
-        top: startTop,
-        width: startWidth,
-        height: startHeight,
-        x: 0,
-        y: 0,
-        scale: 1,
-        rotation: 0,
-      });
-      gsap.set(wrap, { autoAlpha: 1, clipPath: FULL_CLIP, willChange: "clip-path, transform" });
-      gsap.set(img, { autoAlpha: 1, objectPosition: startCrop, willChange: "transform" });
-      gsap.set(overlayRef.current, { autoAlpha: 0 });
-      gsap.set(titleRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, y: 34 });
-      gsap.set([labelRef.current, counterRef.current], { autoAlpha: 0, xPercent: -50, y: 28 });
-      gsap.set(crosses, { autoAlpha: 0, yPercent: -50, scale: 0.86, rotation: 0 });
-      gsap.set(closeRef.current, { autoAlpha: 0, y: 10 });
-
-      const timeline = gsap.timeline({
-        onComplete: () => {
-          if (openTimelineSeqRef.current !== token) return;
-          openTimelineRef.current = null;
-          phaseRef.current = "open";
-          releaseWillChange(lightbox, wrap, img);
-          openSourceRectRef.current = null;
-        },
-      });
-      openTimelineRef.current = timeline;
-
-      if (reducedMotionRef.current) {
-        gsap.set(lightbox, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
-        gsap.set(img, { objectPosition: "50% 50%" });
-        timeline.to([overlayRef.current, ...text, ...crosses, closeRef.current], {
-          autoAlpha: 1,
-          duration: 0.24,
-          ease: "power2.out",
-        }, 0);
-        return;
-      }
-
-      timeline
-        .to(
-          lightbox,
-          { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight, duration: 0.94, ease: EXPAND_EASE },
-          0,
-        )
-        .to(img, { objectPosition: "50% 50%", duration: 0.94, ease: EXPAND_EASE }, 0)
-        .to(overlayRef.current, { autoAlpha: 1, duration: 0.36, ease: "power2.out" }, 0.54);
-
-      if (text.length) {
-        timeline.to(text, { autoAlpha: 1, y: 0, duration: 0.5, stagger: 0.07, ease: "power3.out" }, 0.68);
-      }
-      if (crosses.length) {
-        timeline.to(crosses, { autoAlpha: 1, scale: 1, duration: 0.46, stagger: 0.06, ease: "power3.out" }, 0.74);
-      }
-      timeline.to(closeRef.current, { autoAlpha: 1, y: 0, duration: 0.36, ease: "power3.out" }, 0.78);
-    },
-    [preloadNeighbors, releaseWillChange, stopUI],
-  );
-
-  const startSlideAnimation = useCallback(
-    (slideId: number, index: number, oldId: number | null, direction: 1 | -1) => {
-      const stage = stageRef.current;
-      const newDom = slideDomRef.current.get(slideId);
-      const oldDom = oldId !== null ? slideDomRef.current.get(oldId) : undefined;
-      const newWrap = newDom?.wrap ?? null;
-      const newImg = newDom?.img ?? null;
-      if (!stage || !newWrap || !newImg) return;
-
-      slideTimelineSeqRef.current += 1;
-      const token = slideTimelineSeqRef.current;
-      slideTimelineRef.current?.kill();
-      stopUI();
-
-      preloadNeighbors(index);
-
-      const startClip =
-        direction > 0
-          ? "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)"
-          : "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)";
-
-      gsap.set(newWrap, { autoAlpha: 1, clipPath: startClip, willChange: "clip-path" });
-      gsap.set(newImg, {
-        autoAlpha: 1,
-        objectPosition: "50% 50%",
-        x: reducedMotionRef.current ? 0 : direction * 300,
-        y: 0,
-        willChange: "transform",
-      });
-
-      if (oldDom?.img) {
-        gsap.set(oldDom.img, { objectPosition: "50% 50%", x: 0, y: 0, willChange: "transform" });
-      }
-
-      const slideTimeline = gsap.timeline({
-        onComplete: () => {
-          if (slideTimelineSeqRef.current !== token) return;
-          slideTimelineRef.current = null;
-          releaseWillChange(newWrap, newImg, oldDom?.wrap, oldDom?.img);
-          if (oldId !== null) {
-            setSlides((prev) => prev.filter((s) => s.id !== oldId));
-          }
-        },
-      });
-      slideTimelineRef.current = slideTimeline;
-
-      if (reducedMotionRef.current) {
-        gsap.set(newWrap, { clipPath: FULL_CLIP, autoAlpha: 0 });
-        slideTimeline.to(newWrap, { autoAlpha: 1, duration: 0.18, ease: "power1.out" }, 0);
-        if (oldDom?.wrap) {
-          slideTimeline.to(oldDom.wrap, { autoAlpha: 0, duration: 0.18, ease: "power1.out" }, 0);
-        }
-      } else {
-        if (oldDom?.img) {
-          slideTimeline.to(oldDom.img, { x: -300 * direction, duration: 0.74, ease: "power4.out" }, 0);
-        }
-        slideTimeline
-          .to(newWrap, { clipPath: FULL_CLIP, duration: 0.74, ease: "power4.out" }, 0)
-          .to(newImg, { x: 0, duration: 0.74, ease: "power4.out" }, 0);
-      }
-
-      const uiToken = ++uiTimelineSeqRef.current;
-      const uiTimeline = createUITimeline();
-      const text = asElements(titleRef.current, labelRef.current, counterRef.current);
-      const crosses = asElements(crossLeftRef.current, crossRightRef.current);
-
-      crossRotationRef.current = [
-        crossRotationRef.current[0] + direction * 90,
-        crossRotationRef.current[1] + direction * 90,
-      ];
-      const [leftTarget, rightTarget] = crossRotationRef.current;
-
-      if (reducedMotionRef.current) {
-        if (text.length) {
-          uiTimeline.to(text, { autoAlpha: 0, duration: 0.12, ease: "power1.in" }, 0);
-        }
-        if (crosses.length) {
-          gsap.set(crossLeftRef.current, { rotation: leftTarget });
-          gsap.set(crossRightRef.current, { rotation: rightTarget });
-        }
-        uiTimeline.call(() => {
-          const nextWork = works[index];
-          if (nextWork) {
-            if (titleRef.current) titleRef.current.textContent = nextWork.title;
-            if (labelRef.current) labelRef.current.textContent = nextWork.label;
-            if (counterRef.current) {
-              counterRef.current.textContent = `${String(index + 1).padStart(2, "0")} — ${String(
-                works.length,
-              ).padStart(2, "0")}`;
-            }
-          }
-        }, [], 0.12);
-        if (text.length) {
-          uiTimeline.to(text, { autoAlpha: 1, duration: 0.12, ease: "power1.out" }, 0.12);
-        }
-      } else {
-        if (text.length) {
-          uiTimeline.to(
-            text,
-            { autoAlpha: 0, y: -36 * direction, duration: 0.28, stagger: 0.04, ease: "power2.in" },
-            0,
-          );
-        }
-        if (crosses.length) {
-          uiTimeline.to(crossLeftRef.current, { rotation: leftTarget, duration: 0.74, ease: "power4.out" }, 0);
-          uiTimeline.to(crossRightRef.current, { rotation: rightTarget, duration: 0.74, ease: "power4.out" }, 0);
-        }
-
-        uiTimeline.call(() => {
-          const nextWork = works[index];
-          if (nextWork) {
-            if (titleRef.current) titleRef.current.textContent = nextWork.title;
-            if (labelRef.current) labelRef.current.textContent = nextWork.label;
-            if (counterRef.current) {
-              counterRef.current.textContent = `${String(index + 1).padStart(2, "0")} — ${String(
-                works.length,
-              ).padStart(2, "0")}`;
-            }
-          }
-        }, [], 0.24);
-
-        if (text.length) {
-          uiTimeline
-            .set(text, { autoAlpha: 0, y: 36 * direction }, 0.24)
-            .to(text, { autoAlpha: 1, y: 0, duration: 0.48, stagger: 0.06, ease: "power3.out" }, 0.32);
-        }
-      }
-
-      uiTimeline.eventCallback("onComplete", () => {
-        if (uiTimelineSeqRef.current !== uiToken) return;
-        uiTimelineRef.current = null;
-        phaseRef.current = "open";
-      });
-    },
-    [createUITimeline, preloadNeighbors, releaseWillChange],
-  );
-
-  const cancelOpenTimeline = useCallback(() => {
-    openTimelineSeqRef.current += 1;
-    openTimelineRef.current?.kill();
-    openTimelineRef.current = null;
-  }, []);
-
-  const cancelSlideTimeline = useCallback(() => {
-    slideTimelineSeqRef.current += 1;
-    slideTimelineRef.current?.kill();
-    slideTimelineRef.current = null;
-  }, []);
-
-  const cancelCloseTimeline = useCallback(() => {
-    closeTimelineSeqRef.current += 1;
-    closeTimelineRef.current?.kill();
-    closeTimelineRef.current = null;
-  }, []);
-
-  const cancelAllTimelines = useCallback(() => {
-    cancelOpenTimeline();
-    cancelSlideTimeline();
-    cancelCloseTimeline();
-    uiTimelineSeqRef.current += 1;
-    uiTimelineRef.current?.kill();
-    uiTimelineRef.current = null;
-  }, [cancelCloseTimeline, cancelOpenTimeline, cancelSlideTimeline]);
-
   /** @param index Index into `works` whose gallery-grid geometry we want to read. */
   const readGalleryItem = useCallback((index: number): GalleryRect | null => {
     const wrap = document.querySelector<HTMLDivElement>(
@@ -576,35 +317,142 @@ export function useLightboxAnimation(
     gsap.set(closeRef.current, { autoAlpha: 1, y: 0 });
   }, [writeInfo]);
 
+  const syncGalleryToIndex = useCallback(
+    (index: number, offset?: number | null) => {
+      const target = document.querySelector<HTMLDivElement>(
+        `.image-wrap[data-work-index="${index}"]`,
+      );
+      const first = document.querySelector<HTMLDivElement>('.image-wrap[data-work-index="0"]');
+      if (!target || !first) return;
+
+      gsap.killTweensOf(target);
+      gsap.set(target, { x: 0, y: 0, scale: 1 });
+
+      const nextOffset = offset ?? -(target.offsetLeft + first.offsetWidth / 2);
+      snapRef.current = nextOffset;
+      window.dispatchEvent(new CustomEvent(GALLERY_SNAP_EVENT, { detail: { index, offset: nextOffset } }));
+      setActiveIndex(index);
+    },
+    [setActiveIndex, snapRef],
+  );
+
   const openLightbox = useCallback(
     (index: number) => {
+      wasOpenRef.current = true;
+      restoreOffsetRef.current = readGalleryOffset(index);
+      setActiveIndex(index);
+      setLbOpen(true);
+      setLbIndex(index);
+
       const lightbox = lightboxRef.current;
       const stage = stageRef.current;
       if (!lightbox || !stage || !works[index]) return;
 
-      cancelAllTimelines();
+      // Interrupting a close (or a previous open) must not leave two
+      // timelines fighting over the lightbox's left/top/width/height.
+      mainTimelineRef.current?.kill();
+      stopUI();
 
       const source = readGalleryItem(index);
-      openSourceRectRef.current = source;
+      const rect = source?.rect;
+      const startLeft = rect?.left ?? 0;
+      const startTop = rect?.top ?? 0;
+      const startWidth = rect?.width ?? window.innerWidth;
+      const startHeight = rect?.height ?? window.innerHeight;
+      const startCrop = source?.objectPosition ?? "50% 50%";
+      const text = asElements(titleRef.current, labelRef.current, counterRef.current);
+      const crosses = asElements(crossLeftRef.current, crossRightRef.current);
       const scrollbarWidth = getScrollbarWidth();
 
       document.body.style.overflow = "hidden";
       document.body.style.paddingRight = scrollbarWidth > 0 ? `${scrollbarWidth}px` : "";
 
-      wasOpenRef.current = true;
       phaseRef.current = "opening";
       currentIndexRef.current = index;
-      setActiveIndex(index);
-      setLbOpen(true);
-      setLbIndex(index);
       crossRotationRef.current = [0, 0];
 
       const id = slideSeqRef.current++;
       frontIdRef.current = id;
-      pendingOpenSlideRef.current = { id, index };
-      setSlides([{ id, index, z: 2 }]);
+
+      // Mount the first slide synchronously so GSAP can read/animate the
+      // real DOM node within this same tick, instead of manufacturing it
+      // with document.createElement.
+      flushSync(() => {
+        setSlides([{ id, index, z: 2 }]);
+      });
+
+      const dom = slideDomRef.current.get(id);
+      const wrap = dom?.wrap ?? null;
+      const img = dom?.img ?? null;
+      if (!wrap || !img) return;
+
+      writeInfo(index);
+      preloadNeighbors(index);
+
+      gsap.set(lightbox, {
+        autoAlpha: 1,
+        pointerEvents: "auto",
+        willChange: "left, top, width, height",
+        left: startLeft,
+        top: startTop,
+        width: startWidth,
+        height: startHeight,
+        x: 0,
+        y: 0,
+        scale: 1,
+        rotation: 0,
+      });
+      gsap.set(wrap, { autoAlpha: 1, clipPath: FULL_CLIP, willChange: "clip-path, transform" });
+      gsap.set(img, { autoAlpha: 1, objectPosition: startCrop, willChange: "transform" });
+      gsap.set(overlayRef.current, { autoAlpha: 0 });
+      gsap.set(titleRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, y: 34 });
+      gsap.set([labelRef.current, counterRef.current], { autoAlpha: 0, xPercent: -50, y: 28 });
+      gsap.set(crosses, { autoAlpha: 0, yPercent: -50, scale: 0.86, rotation: 0 });
+      gsap.set(closeRef.current, { autoAlpha: 0, y: 10 });
+
+      if (reducedMotionRef.current) {
+        gsap.set(lightbox, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+        gsap.set(img, { objectPosition: "50% 50%" });
+        const tl = gsap.timeline({
+          onComplete: () => {
+            phaseRef.current = "open";
+            releaseWillChange(lightbox, wrap, img);
+          },
+        });
+        mainTimelineRef.current = tl;
+        tl.to([overlayRef.current, ...text, ...crosses, closeRef.current], {
+          autoAlpha: 1,
+          duration: 0.24,
+          ease: "power2.out",
+        }, 0);
+        return;
+      }
+
+      const tl = gsap.timeline({
+        onComplete: () => {
+          phaseRef.current = "open";
+          releaseWillChange(lightbox, wrap, img);
+        },
+      });
+      mainTimelineRef.current = tl;
+
+      tl.to(
+        lightbox,
+        { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight, duration: 0.94, ease: EXPAND_EASE },
+        0,
+      )
+        .to(img, { objectPosition: "50% 50%", duration: 0.94, ease: EXPAND_EASE }, 0)
+        .to(overlayRef.current, { autoAlpha: 1, duration: 0.36, ease: "power2.out" }, 0.54);
+
+      if (text.length) {
+        tl.to(text, { autoAlpha: 1, y: 0, duration: 0.5, stagger: 0.07, ease: "power3.out" }, 0.68);
+      }
+      if (crosses.length) {
+        tl.to(crosses, { autoAlpha: 1, scale: 1, duration: 0.46, stagger: 0.06, ease: "power3.out" }, 0.74);
+      }
+      tl.to(closeRef.current, { autoAlpha: 1, y: 0, duration: 0.36, ease: "power3.out" }, 0.78);
     },
-    [cancelAllTimelines, readGalleryItem, setActiveIndex, setLbIndex, setLbOpen],
+    [preloadNeighbors, readGalleryItem, readGalleryOffset, releaseWillChange, stopUI, writeInfo],
   );
 
   const goTo = useCallback(
@@ -618,8 +466,6 @@ export function useLightboxAnimation(
       const stage = stageRef.current;
       if (!stage) return;
 
-      cancelAllTimelines();
-
       const currentIndex = currentIndexRef.current;
       const nextIndex = (currentIndex + direction + works.length) % works.length;
       const oldId = frontIdRef.current;
@@ -631,24 +477,122 @@ export function useLightboxAnimation(
       setLbIndex(nextIndex);
       setActiveIndex(nextIndex);
 
-      pendingSlideRef.current = {
-        id: newId,
-        index: nextIndex,
-        oldId,
-        direction,
-      };
+      // Mount the new slide synchronously (so it's ready to animate this
+      // tick) and trim the stack down to MAX_STACKED_SLIDES.
+      flushSync(() => {
+        setSlides((prev) => {
+          const withNew: SlideEntry[] = [
+            ...prev.map((s) => ({ ...s, z: 1 as const })),
+            { id: newId, index: nextIndex, z: 2 as const },
+          ];
+          return withNew.length > MAX_STACKED_SLIDES
+            ? withNew.slice(withNew.length - MAX_STACKED_SLIDES)
+            : withNew;
+        });
+      });
 
-      setSlides((prev) => {
-        const withNew: SlideEntry[] = [
-          ...prev.map((s) => ({ ...s, z: 1 as const })),
-          { id: newId, index: nextIndex, z: 2 as const },
-        ];
-        return withNew.length > MAX_STACKED_SLIDES
-          ? withNew.slice(withNew.length - MAX_STACKED_SLIDES)
-          : withNew;
+      const newDom = slideDomRef.current.get(newId);
+      const oldDom = oldId !== null ? slideDomRef.current.get(oldId) : undefined;
+      const newWrap = newDom?.wrap ?? null;
+      const newImg = newDom?.img ?? null;
+      if (!newWrap || !newImg) return;
+
+      preloadNeighbors(nextIndex);
+
+      const startClip =
+        direction > 0
+          ? "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)"
+          : "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)";
+
+      gsap.set(newWrap, { autoAlpha: 1, clipPath: startClip, willChange: "clip-path" });
+      gsap.set(newImg, {
+        autoAlpha: 1,
+        objectPosition: "50% 50%",
+        x: reducedMotionRef.current ? 0 : direction * 300,
+        y: 0,
+        willChange: "transform",
+      });
+
+      if (oldDom?.img) {
+        gsap.set(oldDom.img, { objectPosition: "50% 50%", x: 0, y: 0, willChange: "transform" });
+      }
+
+      const slideTl = gsap.timeline({
+        onComplete: () => {
+          releaseWillChange(newWrap, newImg, oldDom?.wrap, oldDom?.img);
+          if (oldId !== null) {
+            setSlides((prev) => prev.filter((s) => s.id !== oldId));
+          }
+        },
+      });
+
+      if (reducedMotionRef.current) {
+        gsap.set(newWrap, { clipPath: FULL_CLIP, autoAlpha: 0 });
+        slideTl.to(newWrap, { autoAlpha: 1, duration: 0.18, ease: "power1.out" }, 0);
+        if (oldDom?.wrap) {
+          slideTl.to(oldDom.wrap, { autoAlpha: 0, duration: 0.18, ease: "power1.out" }, 0);
+        }
+      } else {
+        if (oldDom?.img) {
+          slideTl.to(oldDom.img, { x: -300 * direction, duration: 0.74, ease: "power4.out" }, 0);
+        }
+        slideTl
+          .to(newWrap, { clipPath: FULL_CLIP, duration: 0.74, ease: "power4.out" }, 0)
+          .to(newImg, { x: 0, duration: 0.74, ease: "power4.out" }, 0);
+      }
+
+      const uiTl = createUITimeline();
+      const text = asElements(titleRef.current, labelRef.current, counterRef.current);
+      const crosses = asElements(crossLeftRef.current, crossRightRef.current);
+
+      // Exact +/-90deg accumulation — never re-derived from the rendered
+      // rotation — so repeated direction changes can't drift off-axis.
+      crossRotationRef.current = [
+        crossRotationRef.current[0] + direction * 90,
+        crossRotationRef.current[1] + direction * 90,
+      ];
+      const [leftTarget, rightTarget] = crossRotationRef.current;
+
+      if (reducedMotionRef.current) {
+        if (text.length) {
+          uiTl.to(text, { autoAlpha: 0, duration: 0.12, ease: "power1.in" }, 0);
+        }
+        if (crosses.length) {
+          gsap.set(crossLeftRef.current, { rotation: leftTarget });
+          gsap.set(crossRightRef.current, { rotation: rightTarget });
+        }
+        uiTl.call(() => writeInfo(nextIndex), [], 0.12);
+        if (text.length) {
+          uiTl.to(text, { autoAlpha: 1, duration: 0.12, ease: "power1.out" }, 0.12);
+        }
+      } else {
+        if (text.length) {
+          uiTl.to(
+            text,
+            { autoAlpha: 0, y: -36 * direction, duration: 0.28, stagger: 0.04, ease: "power2.in" },
+            0,
+          );
+        }
+        if (crosses.length) {
+          uiTl.to(crossLeftRef.current, { rotation: leftTarget, duration: 0.74, ease: "power4.out" }, 0);
+          uiTl.to(crossRightRef.current, { rotation: rightTarget, duration: 0.74, ease: "power4.out" }, 0);
+        }
+
+        uiTl.call(() => writeInfo(nextIndex), [], 0.24);
+
+        if (text.length) {
+          uiTl
+            .set(text, { autoAlpha: 0, y: 36 * direction }, 0.24)
+            .to(text, { autoAlpha: 1, y: 0, duration: 0.48, stagger: 0.06, ease: "power3.out" }, 0.32);
+        }
+      }
+
+      uiTl.eventCallback("onComplete", () => {
+        phaseRef.current = "open";
+        uiTimelineRef.current = null;
       });
     },
-    [cancelAllTimelines, setActiveIndex, setLbIndex],
+    [createUITimeline, preloadNeighbors, releaseWillChange, setActiveIndex, setLbIndex, writeInfo],
   );
 
   const closeLightbox = useCallback(() => {
@@ -660,7 +604,11 @@ export function useLightboxAnimation(
     const frontImg = frontDom?.img ?? null;
     if (!lightbox || !frontImg) return;
 
-    cancelAllTimelines();
+    // Same reasoning as in openLightbox: without this, an open that's
+    // interrupted mid-expand keeps animating lightbox's left/top/width/height
+    // in parallel with this close, and its onComplete fires later and stomps
+    // phaseRef back to "open".
+    mainTimelineRef.current?.kill();
 
     const index = currentIndexRef.current;
     const text = asElements(titleRef.current, labelRef.current, counterRef.current);
@@ -671,22 +619,36 @@ export function useLightboxAnimation(
     wasOpenRef.current = false;
     setLbOpen(false);
 
-    const destination = openSourceRectRef.current ?? readGalleryItem(index);
+    const trackEl = document.getElementById("image-track");
+    const targetWrap = document.querySelector<HTMLDivElement>(`.image-wrap[data-work-index="${index}"]`);
+    if (targetWrap) {
+      gsap.set(targetWrap, { x: 0, y: 0, scale: 1 });
+    }
+    if (trackEl) {
+      gsap.set(trackEl, { scale: 1 });
+    }
+
+    syncGalleryToIndex(index, restoreOffsetRef.current);
+
+    const destination = readGalleryItem(index);
+
+    if (trackEl) {
+      gsap.set(trackEl, { scale: 0.85 });
+    }
+
+    settleUI();
 
     stopUI();
     const allSlideEls = Array.from(slideDomRef.current.values()).flatMap((d) => asElements(d.wrap, d.img));
     if (allSlideEls.length) gsap.killTweensOf(allSlideEls);
 
-    const token = ++closeTimelineSeqRef.current;
     const tl = gsap.timeline({
       onComplete: () => {
-        if (closeTimelineSeqRef.current !== token) return;
-        closeTimelineRef.current = null;
         resetVisuals();
         phaseRef.current = "idle";
       },
     });
-    closeTimelineRef.current = tl;
+    mainTimelineRef.current = tl;
 
     if (reducedMotionRef.current) {
       if (destination) {
@@ -736,7 +698,7 @@ export function useLightboxAnimation(
         0.1,
       );
     }
-  }, [cancelAllTimelines, readGalleryItem, resetVisuals, setLbOpen, stopUI]);
+  }, [readGalleryItem, resetVisuals, setLbOpen, settleUI, stopUI, syncGalleryToIndex]);
 
   // One-time visual reset on mount; gsap.context handles teardown on unmount.
   useLayoutEffect(() => {
@@ -745,31 +707,10 @@ export function useLightboxAnimation(
     const ctx = gsap.context(() => resetVisuals(), lightbox);
     return () => {
       stopUI();
-      cancelAllTimelines();
+      mainTimelineRef.current?.kill();
       ctx.revert();
     };
-  }, [cancelAllTimelines, resetVisuals, stopUI]);
-
-  useLayoutEffect(() => {
-    if (phaseRef.current === "opening" && pendingOpenSlideRef.current) {
-      const pending = pendingOpenSlideRef.current;
-      const dom = slideDomRef.current.get(pending.id);
-      if (dom?.wrap && dom?.img) {
-        pendingOpenSlideRef.current = null;
-        startOpenAnimation(pending.id, pending.index);
-        return;
-      }
-    }
-
-    if (phaseRef.current === "sliding" && pendingSlideRef.current) {
-      const pending = pendingSlideRef.current;
-      const dom = slideDomRef.current.get(pending.id);
-      if (dom?.wrap && dom?.img) {
-        pendingSlideRef.current = null;
-        startSlideAnimation(pending.id, pending.index, pending.oldId, pending.direction);
-      }
-    }
-  }, [slides, startOpenAnimation, startSlideAnimation]);
+  }, [resetVisuals, stopUI]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
