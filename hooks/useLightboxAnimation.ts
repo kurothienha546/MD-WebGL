@@ -407,7 +407,7 @@ export function useLightboxAnimation(
         autoAlpha: 1,
         objectPosition: "50% 50%",
         x: startX,
-        scale: 1.18,
+        scale: 1,
         willChange: "transform",
         force3D: true,
       });
@@ -740,12 +740,12 @@ export function useLightboxAnimation(
           const liveImg = targetImage ?? targetWrap?.querySelector<HTMLImageElement>(".image");
           const liveX = liveImg ? Number(gsap.getProperty(liveImg, "x")) || 0 : 0;
           const currentImgX = liveX * eased;
-          const currentImgScale = 1 + 0.25 * eased;
+          const currentImgScale = 1 + 0.3 * eased;
 
           if (frontImg) {
             gsap.set(frontImg, {
               x: currentImgX,
-              scale: currentImgScale,
+              scale: 1,
               objectPosition: "50% 50%",
               force3D: true,
             });
