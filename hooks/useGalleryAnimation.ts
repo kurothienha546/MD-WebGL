@@ -19,9 +19,9 @@ const CLICK_DISTANCE_THRESHOLD_PX = 6;
 // --- chase / settle physics ---
 const WHEEL_MULTIPLIER = 0.6;
 /** Below this distance-to-target, the per-frame chase snaps to exact value. */
-const SETTLE_EPSILON_PX = 0.08;
+const SETTLE_EPSILON_PX = 0.0001;
 const IDLE_EASE = 0.04;
-const DRAG_EASE = 0.01;
+const DRAG_EASE = 0.03;
 
 const RESIZE_DEBOUNCE_MS = 100;
 
@@ -33,10 +33,10 @@ const ENTRANCE_CROSSHAIR_DURATION = 0.48;
 const ENTRANCE_CROSSHAIR_START = 0.82;
 
 // --- crosshair show/hide with lightbox ---
-const CROSSHAIR_HIDE_DURATION = 0.18;
-const CROSSHAIR_SHOW_DURATION = 0.42;
-const CROSSHAIR_HIDDEN_SCALE = 0.9;
-const SPATIAL_SHIFT_DURATION = 0.94;
+const CROSSHAIR_HIDE_DURATION = 0.2;
+const CROSSHAIR_SHOW_DURATION = 0.65;
+const CROSSHAIR_HIDDEN_SCALE = 0.7;
+const SPATIAL_SHIFT_DURATION = 0.83;
 const SPATIAL_SHIFT_OPACITY = 0.28;
 const SPATIAL_SHIFT_SCALE_STEP = 0.07;
 
@@ -185,11 +185,17 @@ export function useGalleryAnimation(
   }, []);
 
   const applyWillChange = useCallback(() => {
-    if (trackRef.current) gsap.set(trackRef.current, { willChange: "transform" });
+    if (trackRef.current) gsap.set(trackRef.current, { willChange: "transform", force3D: true });
+    wrapNodesRef.current.forEach((wrap) => {
+      gsap.set(wrap, { willChange: "transform", force3D: true, backfaceVisibility: "hidden" });
+    });
   }, []);
 
   const releaseWillChange = useCallback(() => {
     if (trackRef.current) gsap.set(trackRef.current, { willChange: "auto" });
+    wrapNodesRef.current.forEach((wrap) => {
+      gsap.set(wrap, { willChange: "auto" });
+    });
   }, []);
 
   const stopMotion = useCallback(() => {
@@ -228,16 +234,27 @@ export function useGalleryAnimation(
       const track = trackRef.current;
 
       currentOffsetRef.current = nextOffset;
-      if (track) gsap.set(track, { x: nextOffset });
+      if (track) gsap.set(track, { x: nextOffset, force3D: true });
 
       if (!centers.length) return;
 
-      const objectPosition = min === max ? 100 : 100 * (1 - (nextOffset - max) / (min - max));
-      if (Math.abs(objectPosition - cropPercentRef.current) > 0.01) {
-        cropPercentRef.current = objectPosition;
-        if (orderedImagesRef.current.length) {
-          gsap.set(orderedImagesRef.current, { objectPosition: `${objectPosition.toFixed(3)}% 50%` });
-        }
+      const viewportCenterX = window.innerWidth / 2;
+      const maxParallaxShiftPx = 80;
+
+      if (orderedImagesRef.current.length && centers.length) {
+        orderedImagesRef.current.forEach((imgNode, index) => {
+          const center = centers[index];
+          if (!imgNode || center === undefined) return;
+
+          const distFromCenter = (nextOffset - center) / viewportCenterX;
+          const parallaxX = -Math.max(-1, Math.min(1, distFromCenter)) * maxParallaxShiftPx;
+
+          gsap.set(imgNode, {
+            x: parallaxX,
+            scale: 1.25,
+            force3D: true,
+          });
+        });
       }
 
       const progress = min === max ? 0 : (100 * (nextOffset - max)) / (min - max);
@@ -332,7 +349,9 @@ export function useGalleryAnimation(
   // never changes identity and just calls whatever this currently points to.
   tickRef.current = () => {
     const diff = targetOffsetRef.current - currentOffsetRef.current;
-    if (Math.abs(diff) < SETTLE_EPSILON_PX) {
+    const absDiff = Math.abs(diff);
+
+    if (absDiff < SETTLE_EPSILON_PX) {
       if (currentOffsetRef.current !== targetOffsetRef.current) {
         currentOffsetRef.current = targetOffsetRef.current;
         renderOffset(currentOffsetRef.current);
@@ -343,7 +362,14 @@ export function useGalleryAnimation(
 
     // Only the idle chase (wheel/settle-driven) goes instant under reduced
     // motion — active drag-tracking is direct manipulation, not "animation".
-    const ease = dragRef.current ? DRAG_EASE : reducedMotionRef.current ? 1 : IDLE_EASE;
+    let ease = dragRef.current ? DRAG_EASE : reducedMotionRef.current ? 1 : IDLE_EASE;
+
+    // Smoothly close the sub-pixel tail when distance is under 1px so it settles
+    // cleanly without trailing at micro-pixel speeds for 80+ frames.
+    if (!dragRef.current && absDiff < 1.0) {
+      ease = Math.max(ease, 0.22);
+    }
+
     currentOffsetRef.current += diff * ease;
     renderOffset(currentOffsetRef.current);
   };
@@ -433,7 +459,7 @@ export function useGalleryAnimation(
 
       gsap.set(track, { x: 0, yPercent: -50 });
       gsap.set(progressRef.current, { scaleX: 0, transformOrigin: "left center" });
-      gsap.set(crosshairRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, scale: 0.9 });
+      gsap.set(crosshairRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, scale: 0 });
       gsap.set(underlines, { opacity: 0 });
 
       if (reducedMotionRef.current) {
@@ -460,7 +486,7 @@ export function useGalleryAnimation(
       if (!initiallyOpenRef.current) {
         entrance.to(
           crosshairRef.current,
-          { autoAlpha: 1, scale: 1, duration: ENTRANCE_CROSSHAIR_DURATION },
+          { autoAlpha: 1, scale: 1, duration: 0.65, ease: "power3.out" },
           ENTRANCE_CROSSHAIR_START,
         );
       }
@@ -552,25 +578,39 @@ export function useGalleryAnimation(
     const crosshair = crosshairRef.current;
     const track = trackRef.current;
 
+    const tl = gsap.timeline({
+      defaults: {
+        duration: lbOpen ? 0.94 : 0.78,
+        ease: "expo.out",
+      },
+    });
+
     if (crosshair) {
       gsap.killTweensOf(crosshair);
-      gsap.to(crosshair, {
-        autoAlpha: lbOpen ? 0 : 1,
-        scale: lbOpen ? CROSSHAIR_HIDDEN_SCALE : 1,
-        duration: lbOpen ? CROSSHAIR_HIDE_DURATION : CROSSHAIR_SHOW_DURATION,
-        ease: "power3.out",
-      });
+      if (lbOpen) {
+        tl.to(crosshair, { autoAlpha: 0, scale: 0, duration: 0.3, ease: "power2.in" }, 0);
+      } else {
+        tl.fromTo(
+          crosshair,
+          { scale: 0, autoAlpha: 0, xPercent: -50, yPercent: -50 },
+          { scale: 1, autoAlpha: 1, duration: 0.65, delay: 0.2, ease: "power3.out" },
+          0,
+        );
+      }
     }
 
     if (track) {
       gsap.killTweensOf(track);
-      gsap.to(track, {
-        scale: lbOpen ? 0.85 : 1,
-        opacity: lbOpen ? 0.25 : 1,
-        duration: 0.94,
-        ease: "expo.out",
-        transformOrigin: "50% 50%",
-      });
+      tl.to(
+        track,
+        {
+          scale: lbOpen ? 0.85 : 1,
+          opacity: lbOpen ? 0.25 : 1,
+          transformOrigin: "50% 50%",
+          force3D: true,
+        },
+        0,
+      );
     }
 
     const activeIndex = useSliderStore.getState().activeIndex;
@@ -589,43 +629,50 @@ export function useGalleryAnimation(
 
         const distance = Math.max(1, Math.abs(index - activeIndex));
         const direction = index < activeIndex ? -1 : 1;
-        gsap.to(node, {
-          x: `${direction * (8 + distance * 2.5)}vw`,
-          y: `${(distance + 1) * 2.5}vh`,
-          scale: Math.max(0.48, 1 - distance * SPATIAL_SHIFT_SCALE_STEP),
-          opacity: SPATIAL_SHIFT_OPACITY,
-          duration: SPATIAL_SHIFT_DURATION,
-          ease: "expo.out",
-          transformOrigin: "50% 50%",
-        });
+        tl.to(
+          node,
+          {
+            x: `${direction * (8 + distance * 2.5)}vw`,
+            y: `${(distance + 1) * 2.5}vh`,
+            scale: Math.max(0.48, 1 - distance * SPATIAL_SHIFT_SCALE_STEP),
+            opacity: SPATIAL_SHIFT_OPACITY,
+            transformOrigin: "50% 50%",
+            force3D: true,
+          },
+          0,
+        );
         return;
       }
 
       if (index === activeIndex) {
         gsap.set(node, { x: 0, y: 0, scale: 1, opacity: 0 });
-        gsap.to(node, {
-          opacity: 1,
-          duration: 0.1,
-          delay: SPATIAL_SHIFT_DURATION - 0.05,
-          ease: "power1.out",
-          overwrite: "auto",
-        });
+        tl.to(
+          node,
+          {
+            opacity: 1,
+            duration: 0.15,
+            ease: "power1.out",
+          },
+          0.63,
+        );
         return;
       }
 
-      gsap.to(node, {
-        x: 0,
-        y: 0,
-        scale: 1,
-        opacity: 1,
-        duration: SPATIAL_SHIFT_DURATION,
-        ease: "expo.out",
-        clearProps: "transform",
-      });
+      tl.to(
+        node,
+        {
+          x: 0,
+          y: 0,
+          scale: 1,
+          opacity: 1,
+          force3D: true,
+        },
+        0,
+      );
     });
 
     return () => {
-      if (crosshair) gsap.killTweensOf(crosshair);
+      tl.kill();
       if (track) gsap.killTweensOf(track);
       cardEntries.forEach(({ node }) => gsap.killTweensOf(node));
     };

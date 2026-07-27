@@ -9,7 +9,8 @@
     transform-origin: center center;
   }
 
-  html, body {
+  html,
+  body {
     width: 100%;
     height: 100vh;
     overflow: hidden;
@@ -30,62 +31,112 @@
   }
 
   @media (pointer: coarse) {
-    html, body { cursor: auto; }
+
+    html,
+    body {
+      cursor: auto;
+    }
   }
 }
 
 @layer utilities {
   @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(14px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
+
   @keyframes fadeIn {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
   }
+
   @keyframes revealImg {
-    from { opacity: 0; transform: translateY(24px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
+
   @keyframes nudge {
-    0%, 100% { transform: translateX(0); }
-    50%      { transform: translateX(5px); }
+
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+
+    50% {
+      transform: translateX(5px);
+    }
+  }
+
+  @keyframes crosshairPop {
+    0% {
+      transform: translate(-50%, -50%) scale(0.4);
+      opacity: 0;
+    }
+
+    100% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
   }
 }
 
-#lightbox.animating { pointer-events: all; }
-#lightbox.open { pointer-events: all; cursor: none; }
+#lightbox.animating {
+  pointer-events: all;
+}
+
+#lightbox.open {
+  pointer-events: all;
+  cursor: none;
+}
+
 @media (pointer: coarse) {
-  #lightbox.open { cursor: auto; }
+  #lightbox.open {
+    cursor: auto;
+  }
 }
 
 #lightbox-overlay {
   opacity: 0;
   transition: opacity .25s 0s;
 }
+
 #lightbox.open #lightbox-overlay {
   opacity: 1;
   transition: opacity .6s .2s;
-}
-
-.lb-cross {
-  opacity: 0;
-  transition: opacity .25s 0s, transform .6s cubic-bezier(.23,1,.32,1);
-}
-#lightbox.open .lb-cross {
-  opacity: 1;
-  transition: opacity .45s .35s, transform .6s cubic-bezier(.23,1,.32,1);
 }
 
 #lightbox-close {
   opacity: 0;
   transition: opacity .25s 0s;
 }
+
 #lightbox.open #lightbox-close {
   opacity: 1;
   transition: opacity .4s .4s;
 }
-#lightbox-close:hover { color: white; }
+
+#lightbox-close:hover {
+  color: white;
+}
 
 #lightbox.closing #lightbox-title,
 #lightbox.closing #lightbox-label,
@@ -95,15 +146,31 @@
   transition: opacity .2s ease !important;
 }
 
-body.lb-open #crosshair {
-  opacity: 0 !important;
-  animation: none;
+@media (max-width: 768px) {
+  header {
+    padding: 20px 24px !important;
+  }
+
+  footer {
+    padding: 0 24px 24px !important;
+  }
+
+  .image-wrap {
+    width: 70vmin !important;
+    height: 50vmin !important;
+  }
 }
 
-@media (max-width: 768px) {
-  header { padding: 20px 24px !important; }
-  footer { padding: 0 24px 24px !important; }
-  .image-wrap { width: 70vmin !important; height: 50vmin !important; }
+.image-wrap,
+.image {
+  /* Mẹo lấp đầy viền subpixel lẻ, triệt tiêu 99% hiện tượng rung viền Shimmer */
+  outline: 1px solid transparent;
+  box-shadow: 0 0 1px transparent;
+
+  /* Giữ Layer GPU ổn định tuyệt đối */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
 }
 
 .image-wrap:focus,
@@ -111,4 +178,3 @@ body.lb-open #crosshair {
   outline: none !important;
   box-shadow: none !important;
 }
-

@@ -282,7 +282,7 @@ export function useLightboxAnimation(
     gsap.set([crossLeftRef.current, crossRightRef.current], {
       autoAlpha: 0,
       yPercent: -50,
-      scale: 0.86,
+      scale: 0.5,
       rotation: 0,
     });
     gsap.set(titleRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, y: 34 });
@@ -381,10 +381,18 @@ export function useLightboxAnimation(
       writeInfo(index);
       preloadNeighbors(index);
 
+      const sourceImage = source?.rect
+        ? document
+          .querySelector<HTMLDivElement>(`.image-wrap[data-work-index="${index}"]`)
+          ?.querySelector<HTMLImageElement>(".image")
+        : null;
+      const startX = sourceImage ? Number(gsap.getProperty(sourceImage, "x")) || 0 : 0;
+
       gsap.set(lightbox, {
         autoAlpha: 1,
         pointerEvents: "auto",
         willChange: "left, top, width, height",
+        force3D: true,
         left: startLeft,
         top: startTop,
         width: startWidth,
@@ -394,17 +402,24 @@ export function useLightboxAnimation(
         scale: 1,
         rotation: 0,
       });
-      gsap.set(wrap, { autoAlpha: 1, clipPath: FULL_CLIP, willChange: "clip-path, transform" });
-      gsap.set(img, { autoAlpha: 1, objectPosition: startCrop, willChange: "transform" });
+      gsap.set(wrap, { autoAlpha: 1, clipPath: FULL_CLIP, willChange: "clip-path, transform", force3D: true });
+      gsap.set(img, {
+        autoAlpha: 1,
+        objectPosition: "50% 50%",
+        x: startX,
+        scale: 1.18,
+        willChange: "transform",
+        force3D: true,
+      });
       gsap.set(overlayRef.current, { autoAlpha: 0 });
       gsap.set(titleRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, y: 34 });
       gsap.set([labelRef.current, counterRef.current], { autoAlpha: 0, xPercent: -50, y: 28 });
-      gsap.set(crosses, { autoAlpha: 0, yPercent: -50, scale: 0.86, rotation: 0 });
+      gsap.set(crosses, { autoAlpha: 0, yPercent: -50, scale: 0, rotation: 0 });
       gsap.set(closeRef.current, { autoAlpha: 0, y: 10 });
 
       if (reducedMotionRef.current) {
         gsap.set(lightbox, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
-        gsap.set(img, { objectPosition: "50% 50%" });
+        gsap.set(img, { objectPosition: "50% 50%", x: 0, scale: 1 });
         const tl = gsap.timeline({
           onComplete: () => {
             phaseRef.current = "open";
@@ -433,14 +448,19 @@ export function useLightboxAnimation(
         { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight, duration: 0.94, ease: EXPAND_EASE },
         0,
       )
-        .to(img, { objectPosition: "50% 50%", duration: 0.94, ease: EXPAND_EASE }, 0)
+        .to(img, { x: 0, scale: 1, objectPosition: "50% 50%", duration: 0.94, ease: EXPAND_EASE }, 0)
         .to(overlayRef.current, { autoAlpha: 1, duration: 0.36, ease: "power2.out" }, 0.54);
 
       if (text.length) {
         tl.to(text, { autoAlpha: 1, y: 0, duration: 0.5, stagger: 0.07, ease: "power3.out" }, 0.68);
       }
       if (crosses.length) {
-        tl.to(crosses, { autoAlpha: 1, scale: 1, duration: 0.46, stagger: 0.06, ease: "power3.out" }, 0.74);
+        tl.fromTo(
+          crosses,
+          { autoAlpha: 0, scale: 0, yPercent: -50, rotation: 0 },
+          { autoAlpha: 1, scale: 1, duration: 0.55, stagger: 0.06, ease: "power3.out" },
+          0.68,
+        );
       }
       tl.to(closeRef.current, { autoAlpha: 1, y: 0, duration: 0.36, ease: "power3.out" }, 0.78);
     },
@@ -468,6 +488,7 @@ export function useLightboxAnimation(
       frontIdRef.current = newId;
       setLbIndex(nextIndex);
       setActiveIndex(nextIndex);
+      syncGalleryToIndex(nextIndex);
 
       // Mount the new slide synchronously (so it's ready to animate this
       // tick) and trim the stack down to MAX_STACKED_SLIDES.
@@ -496,17 +517,18 @@ export function useLightboxAnimation(
           ? "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)"
           : "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)";
 
-      gsap.set(newWrap, { autoAlpha: 1, clipPath: startClip, willChange: "clip-path" });
+      gsap.set(newWrap, { autoAlpha: 1, clipPath: startClip, willChange: "clip-path", force3D: true });
       gsap.set(newImg, {
         autoAlpha: 1,
         objectPosition: "50% 50%",
         x: reducedMotionRef.current ? 0 : direction * 300,
         y: 0,
         willChange: "transform",
+        force3D: true,
       });
 
       if (oldDom?.img) {
-        gsap.set(oldDom.img, { objectPosition: "50% 50%", x: 0, y: 0, willChange: "transform" });
+        gsap.set(oldDom.img, { objectPosition: "50% 50%", x: 0, y: 0, willChange: "transform", force3D: true });
       }
 
       const slideTl = gsap.timeline({
@@ -596,10 +618,6 @@ export function useLightboxAnimation(
     const frontImg = frontDom?.img ?? null;
     if (!lightbox || !frontImg) return;
 
-    // Same reasoning as in openLightbox: without this, an open that's
-    // interrupted mid-expand keeps animating lightbox's left/top/width/height
-    // in parallel with this close, and its onComplete fires later and stomps
-    // phaseRef back to "open".
     mainTimelineRef.current?.kill();
 
     const index = currentIndexRef.current;
@@ -612,7 +630,11 @@ export function useLightboxAnimation(
     setLbOpen(false);
 
     const trackEl = document.getElementById("image-track");
-    const targetWrap = document.querySelector<HTMLDivElement>(`.image-wrap[data-work-index="${index}"]`);
+    const targetWrap = document.querySelector<HTMLDivElement>(
+      `.image-wrap[data-work-index="${index}"]`,
+    );
+    const targetImage = targetWrap?.querySelector<HTMLImageElement>(".image");
+
     if (targetWrap) {
       gsap.set(targetWrap, { x: 0, y: 0, scale: 1 });
     }
@@ -620,29 +642,26 @@ export function useLightboxAnimation(
       gsap.set(trackEl, { scale: 1 });
     }
 
-    syncGalleryToIndex(index, restoreOffsetRef.current);
+    syncGalleryToIndex(index);
 
-    // === FIX #3: Reset mọi clip-path/transform đang lửng lơ trước khi close ===
     const allSlides = Array.from(slideDomRef.current.values());
     allSlides.forEach(({ wrap, img }) => {
       if (wrap) gsap.set(wrap, { clipPath: FULL_CLIP });
       if (img) gsap.set(img, { x: 0, y: 0, objectPosition: "50% 50%" });
     });
-    // ================================================================
-
-    const destination = readGalleryItem(index);
 
     if (trackEl) {
       gsap.set(trackEl, { scale: 0.85 });
     }
 
-    // === FIX #1: Chỉ set geometry, không đụng opacity ===
     settleGeometry();
-    // ===================================================
 
     stopUI();
     const allSlideEls = Array.from(slideDomRef.current.values()).flatMap((d) => asElements(d.wrap, d.img));
     if (allSlideEls.length) gsap.killTweensOf(allSlideEls);
+
+    gsap.set(lightbox, { willChange: "left, top, width, height", force3D: true });
+    if (frontImg) gsap.set(frontImg, { force3D: true });
 
     const tl = gsap.timeline({
       onComplete: () => {
@@ -653,14 +672,16 @@ export function useLightboxAnimation(
     mainTimelineRef.current = tl;
 
     if (reducedMotionRef.current) {
-      if (destination) {
+      const destRect = targetWrap?.getBoundingClientRect();
+      const destObjPos = targetImage?.style.objectPosition || "50% 50%";
+      if (destRect) {
         gsap.set(lightbox, {
-          left: destination.rect.left,
-          top: destination.rect.top,
-          width: destination.rect.width,
-          height: destination.rect.height,
+          left: destRect.left,
+          top: destRect.top,
+          width: destRect.width,
+          height: destRect.height,
         });
-        gsap.set(frontImg, { objectPosition: destination.objectPosition });
+        gsap.set(frontImg, { objectPosition: destObjPos });
       }
       tl.to([overlayRef.current, ...fadeTargets], { autoAlpha: 0, duration: 0.16, ease: "power2.out" }, 0).to(
         lightbox,
@@ -675,33 +696,65 @@ export function useLightboxAnimation(
     }
     const restFade = fadeTargets.filter((t) => !text.includes(t));
     if (restFade.length) {
-      tl.to(restFade, { autoAlpha: 0, scale: 0.9, duration: 0.18, stagger: 0.03, ease: "power2.in" }, 0);
+      tl.to(restFade, { autoAlpha: 0, scale: 0.5, duration: 0.18, stagger: 0.03, ease: "power2.in" }, 0);
     }
     tl.to(overlayRef.current, { autoAlpha: 0, duration: 0.22, ease: "power2.out" }, 0);
 
-    if (destination) {
-      tl.to(
-        lightbox,
-        {
-          left: destination.rect.left,
-          top: destination.rect.top,
-          width: destination.rect.width,
-          height: destination.rect.height,
-          duration: 0.78,
-          ease: EXPAND_EASE,
+    const startLeft = 0;
+    const startTop = 0;
+    const startWidth = window.innerWidth;
+    const startHeight = window.innerHeight;
+
+    const proxy = { progress: 0 };
+    const easeFunc = gsap.parseEase("expo.out");
+
+    let lastKnownRect = targetWrap
+      ? targetWrap.getBoundingClientRect()
+      : new DOMRect(startWidth / 2 - 150, startHeight / 2 - 200, 300, 400);
+
+    tl.to(
+      proxy,
+      {
+        progress: 1,
+        duration: 0.78,
+        ease: "none",
+        onUpdate: () => {
+          const eased = easeFunc(proxy.progress);
+
+          if (targetWrap && document.body.contains(targetWrap)) {
+            lastKnownRect = targetWrap.getBoundingClientRect();
+          }
+
+          const currentLeft = startLeft + (lastKnownRect.left - startLeft) * eased;
+          const currentTop = startTop + (lastKnownRect.top - startTop) * eased;
+          const currentWidth = startWidth + (lastKnownRect.width - startWidth) * eased;
+          const currentHeight = startHeight + (lastKnownRect.height - startHeight) * eased;
+
+          gsap.set(lightbox, {
+            left: currentLeft,
+            top: currentTop,
+            width: currentWidth,
+            height: currentHeight,
+          });
+
+          const liveImg = targetImage ?? targetWrap?.querySelector<HTMLImageElement>(".image");
+          const liveX = liveImg ? Number(gsap.getProperty(liveImg, "x")) || 0 : 0;
+          const currentImgX = liveX * eased;
+          const currentImgScale = 1 + 0.25 * eased;
+
+          if (frontImg) {
+            gsap.set(frontImg, {
+              x: currentImgX,
+              scale: currentImgScale,
+              objectPosition: "50% 50%",
+              force3D: true,
+            });
+          }
         },
-        0.1,
-      ).to(frontImg, { objectPosition: destination.objectPosition, duration: 0.78, ease: EXPAND_EASE }, 0.1);
-    } else {
-      // Smoother fallback than an abrupt cut: fade + settle toward center.
-      tl.to(
-        lightbox,
-        { autoAlpha: 0, scale: 0.92, transformOrigin: "50% 50%", duration: 0.34, ease: "power2.out" },
-        0.1,
-      );
-    }
+      },
+      0.1,
+    );
   }, [
-    readGalleryItem,
     resetVisuals,
     setLbOpen,
     settleGeometry,

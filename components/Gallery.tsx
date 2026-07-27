@@ -34,10 +34,10 @@ export default function Gallery({ snapRef, openLightbox, cursorRef }: GalleryPro
       <div
         ref={crosshairRef}
         id="crosshair"
-        className="pointer-events-none fixed left-1/2 top-1/2 z-[300] h-[22px] w-[22px] max-md:hidden"
+        className="pointer-events-none fixed left-1/2 top-1/2 z-[3000] h-[22px] w-[22px] max-md:hidden"
       >
-        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 rounded-sm bg-text" />
-        <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 rounded-sm bg-text" />
+        <div className="absolute left-1/2 top-0 h-full w-[1.5px] -translate-x-1/2 rounded-sm bg-text" />
+        <div className="absolute left-0 top-1/2 h-[1.5px] w-full -translate-y-1/2 rounded-sm bg-text" />
       </div>
 
       <div
@@ -64,8 +64,8 @@ export default function Gallery({ snapRef, openLightbox, cursorRef }: GalleryPro
           >
             <img
               ref={registerImage(work.src)}
-              className="image h-full w-full object-cover"
-              style={{ objectPosition: "100% 50%" }}
+              className="image block h-full w-full object-cover"
+              style={{ objectPosition: "50% 50%", willChange: "transform", transformOrigin: "center center" }}
               src={work.src}
               alt={work.title}
               draggable={false}
