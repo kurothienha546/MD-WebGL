@@ -65,7 +65,7 @@ export default function Gallery({ snapRef, openLightbox, cursorRef }: GalleryPro
             <img
               ref={registerImage(work.src)}
               className="image block h-full w-full object-cover"
-              style={{ objectPosition: "50% 50%", willChange: "transform", transformOrigin: "center center" }}
+              style={{ objectPosition: "50% 50%", transformOrigin: "center center" }}
               src={work.src}
               alt={work.title}
               draggable={false}

@@ -405,11 +405,9 @@ export function useLightboxAnimation(
       gsap.set(wrap, { autoAlpha: 1, clipPath: FULL_CLIP, willChange: "clip-path, transform", force3D: true });
       gsap.set(img, {
         autoAlpha: 1,
-        // Start at the gallery image's current parallax crop position so the
-        // expand animation begins seamlessly from what the user sees.
-        objectPosition: startCrop,
+        objectPosition: "50% 50%",
         x: startX,
-        scale: 1,
+        scale: 1.15,
         willChange: "transform",
         force3D: true,
       });
@@ -742,10 +740,6 @@ export function useLightboxAnimation(
           const liveImg = targetImage ?? targetWrap?.querySelector<HTMLImageElement>(".image");
           const liveX = liveImg ? Number(gsap.getProperty(liveImg, "x")) || 0 : 0;
           const currentImgX = liveX * eased;
-          // Mirror the gallery image's live parallax crop position every frame.
-          // Without this, the lightbox img stays at 50% 50% while the gallery
-          // image has already been shifted by the parallax — causing a visible
-          // jump the moment the lightbox fully closes and the gallery reappears.
           const liveObjPos = liveImg?.style.objectPosition || "50% 50%";
 
           if (frontImg) {

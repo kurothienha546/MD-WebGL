@@ -245,20 +245,18 @@ export function useGalleryAnimation(
           const center = centers[index];
           if (!imgNode || center === undefined) return;
 
-          // Parallax via object-position — the image stays at scale 1.0 and
-          // fills its overflow:hidden wrap exactly. We pan the crop window
-          // instead of translating the element, so no margin is needed and
-          // the black background is never exposed.
+          const wrapWidth = imgNode.parentElement?.offsetWidth || 400;
+          const maxShift = wrapWidth * 0.06;
+
           const distFromCenter = (nextOffset - center) / viewportCenterX;
           const clamped = Math.max(-1, Math.min(1, distFromCenter));
-          // ±15% shift of the object-position (50% is center)
-          const parallaxPct = 50 - clamped * 15;
+          const parallaxX = -clamped * maxShift;
 
           gsap.set(imgNode, {
-            x: 0,
-            scale: 1,
-            objectPosition: `${parallaxPct}% 50%`,
-            force3D: true,
+            x: parallaxX,
+            scale: 1.15,
+            objectPosition: "50% 50%",
+            force3D: false,
           });
         });
       }
