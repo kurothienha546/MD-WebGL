@@ -23,7 +23,10 @@ export class CardMesh {
   public cardHeight: number;
   public isTextureLoaded = false;
   public isTextureLoading = false;
+
   private src: string;
+  private abortController = new AbortController();
+  private currentImage: HTMLImageElement | null = null;
 
   constructor(options: CardMeshOptions) {
     const { gl, geometry, parent, index, src, cardWidth, cardHeight, baseX } = options;
@@ -46,8 +49,8 @@ export class CardMesh {
       fragment: fragmentShader,
       uniforms: {
         tMap: { value: this.texture },
-        uPlaneSizes: { value: [cardWidth, cardHeight] },
-        uImageSizes: { value: [800, 1000] },
+        uPlaneSizes: { value: new Float32Array([cardWidth, cardHeight]) },
+        uImageSizes: { value: new Float32Array([800, 1000]) },
         uParallaxX: { value: 0 },
         uVelocity: { value: 0 },
         uOpacity: { value: 1.0 },
@@ -67,26 +70,43 @@ export class CardMesh {
     this.isTextureLoading = true;
 
     const img = new Image();
+    this.currentImage = img;
     img.crossOrigin = "anonymous";
     img.src = this.src;
-    img.onload = () => {
-      this.texture.image = img;
-      this.program.uniforms.uImageSizes.value = [img.naturalWidth || 800, img.naturalHeight || 1000];
-      this.isTextureLoaded = true;
-      this.isTextureLoading = false;
-    };
-    img.onerror = () => {
-      this.isTextureLoading = false;
-      console.error(`[CardMesh] Failed to load texture image: ${this.src}`);
-    };
+
+    // Sử dụng addEventListener kèm signal từ AbortController
+    const { signal } = this.abortController;
+
+    img.addEventListener(
+      "load",
+      () => {
+        this.texture.image = img;
+        this.program.uniforms.uImageSizes.value[0] = img.naturalWidth || 800;
+        this.program.uniforms.uImageSizes.value[1] = img.naturalHeight || 1000;
+        this.isTextureLoaded = true;
+        this.isTextureLoading = false;
+        this.currentImage = null;
+      },
+      { signal }
+    );
+
+    img.addEventListener(
+      "error",
+      () => {
+        this.isTextureLoading = false;
+        this.currentImage = null;
+        console.error(`[CardMesh] Failed to load texture image: ${this.src}`);
+      },
+      { signal }
+    );
   }
 
   public updateSize(cardWidth: number, cardHeight: number, baseX: number) {
     this.cardWidth = cardWidth;
     this.cardHeight = cardHeight;
     this.baseX = baseX;
-    this.program.uniforms.uPlaneSizes.value = [cardWidth, cardHeight];
-    this.mesh.scale.set(1, 1, 1);
+    this.program.uniforms.uPlaneSizes.value[0] = cardWidth;
+    this.program.uniforms.uPlaneSizes.value[1] = cardHeight;
   }
 
   public setTransform(
@@ -97,43 +117,22 @@ export class CardMesh {
     scaleY: number,
     opacity: number,
     parallaxX: number,
-    lerpFactor = 0.2,
+    lerpFactor = 0.2
   ) {
-    const SNAP = 0.005; // Hard snap threshold: below 1/200 pixel
+    this.mesh.position.x += (x - this.mesh.position.x) * lerpFactor;
+    this.mesh.position.y += (y - this.mesh.position.y) * lerpFactor;
+    this.mesh.position.z += (z - this.mesh.position.z) * lerpFactor;
 
-    // Position X
-    const dx = x - this.mesh.position.x;
-    this.mesh.position.x = Math.abs(dx) < SNAP ? x : this.mesh.position.x + dx * lerpFactor;
+    this.mesh.scale.x += (scaleX - this.mesh.scale.x) * lerpFactor;
+    this.mesh.scale.y += (scaleY - this.mesh.scale.y) * lerpFactor;
 
-    // Position Y
-    const dy = y - this.mesh.position.y;
-    this.mesh.position.y = Math.abs(dy) < SNAP ? y : this.mesh.position.y + dy * lerpFactor;
+    this.program.uniforms.uOpacity.value +=
+      (opacity - this.program.uniforms.uOpacity.value) * lerpFactor;
+    this.program.uniforms.uParallaxX.value +=
+      (parallaxX - this.program.uniforms.uParallaxX.value) * lerpFactor;
 
-    // Position Z
-    const dz = z - this.mesh.position.z;
-    this.mesh.position.z = Math.abs(dz) < SNAP ? z : this.mesh.position.z + dz * lerpFactor;
-
-    // Scale X
-    const dsx = scaleX - this.mesh.scale.x;
-    this.mesh.scale.x = Math.abs(dsx) < SNAP ? scaleX : this.mesh.scale.x + dsx * lerpFactor;
-
-    // Scale Y
-    const dsy = scaleY - this.mesh.scale.y;
-    this.mesh.scale.y = Math.abs(dsy) < SNAP ? scaleY : this.mesh.scale.y + dsy * lerpFactor;
-
-    // Opacity
-    const dOp = opacity - this.program.uniforms.uOpacity.value;
-    this.program.uniforms.uOpacity.value = Math.abs(dOp) < SNAP ? opacity : this.program.uniforms.uOpacity.value + dOp * lerpFactor;
-
-    // ParallaxX
-    const dPx = parallaxX - this.program.uniforms.uParallaxX.value;
-    this.program.uniforms.uParallaxX.value = Math.abs(dPx) < SNAP ? parallaxX : this.program.uniforms.uParallaxX.value + dPx * lerpFactor;
-
-    // Plane sizes (derived value, always recalculate)
-    this.program.uniforms.uPlaneSizes.value = [
-      this.cardWidth * this.mesh.scale.x,
-      this.cardHeight * this.mesh.scale.y,
-    ];
+    this.program.uniforms.uPlaneSizes.value[0] = this.cardWidth * this.mesh.scale.x;
+    this.program.uniforms.uPlaneSizes.value[1] = this.cardHeight * this.mesh.scale.y;
   }
 
   public setVelocity(v: number) {
@@ -141,10 +140,30 @@ export class CardMesh {
   }
 
   public destroy() {
-    const gl = (this.program as any).gl as WebGLRenderingContext | undefined;
-    if (gl && this.texture?.texture) {
-      gl.deleteTexture(this.texture.texture);
+    // 1. Hủy toàn bộ event listeners đang chờ của Image
+    this.abortController.abort();
+
+    // 2. Cắt đứt src của Image nếu đang tải dở để Browser ngắt download ngay lập tức
+    if (this.currentImage) {
+      this.currentImage.src = "";
+      this.currentImage = null;
     }
+
+    // 3. Cleanup OGL / WebGL resources
+    const gl = (this.program as any).gl as WebGLRenderingContext | OGLRenderingContext | undefined;
+    if (gl) {
+      if (this.texture?.texture) {
+        try {
+          gl.deleteTexture(this.texture.texture);
+        } catch { }
+      }
+      if ((this.program as any).program) {
+        try {
+          gl.deleteProgram((this.program as any).program);
+        } catch { }
+      }
+    }
+
     this.mesh.setParent(null);
   }
 }

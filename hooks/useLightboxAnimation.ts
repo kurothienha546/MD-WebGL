@@ -5,12 +5,13 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useState,
 } from "react";
 import type { MouseEvent, MutableRefObject, RefObject } from "react";
 import gsap from "gsap";
 import { works } from "@/lib/works";
-import { useSliderStore } from "@/store/useSliderStore";
 import { GALLERY_SNAP_EVENT, NAV_LOCK_MS, WHEEL_CLOSE_THRESHOLD } from "@/lib/constants";
+import type { WebGLEngine } from "@/lib/webgl/WebGLEngine";
 
 export type LightboxPhase = "idle" | "opening" | "open" | "sliding" | "closing";
 
@@ -18,6 +19,7 @@ const asElements = (...nodes: Array<HTMLElement | null>): HTMLElement[] =>
   nodes.filter((node): node is HTMLElement => node !== null);
 
 export interface UseLightboxAnimationResult {
+  engineRef: MutableRefObject<WebGLEngine | null>;
   lightboxRef: MutableRefObject<HTMLDivElement | null>;
   overlayRef: MutableRefObject<HTMLDivElement | null>;
   crossLeftRef: MutableRefObject<HTMLDivElement | null>;
@@ -37,13 +39,12 @@ export interface UseLightboxAnimationResult {
 export function useLightboxAnimation(
   _snapRef: MutableRefObject<number | null>,
   outerCrosshairRef?: RefObject<HTMLElement | null>,
+  onActiveIndexChange?: (index: number) => void,
+  onLightboxStateChange?: (open: boolean, index: number) => void,
 ): UseLightboxAnimationResult {
-  const lbOpen = useSliderStore((state) => state.lbOpen);
-  const lbIndex = useSliderStore((state) => state.lbIndex);
-  const setActiveIndex = useSliderStore((state) => state.setActiveIndex);
-  const setLbIndex = useSliderStore((state) => state.setLbIndex);
-  const setLbOpen = useSliderStore((state) => state.setLbOpen);
+  const [isOpen, setIsOpen] = useState(false);
 
+  const engineRef = useRef<WebGLEngine | null>(null);
   const lightboxRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const crossLeftRef = useRef<HTMLDivElement | null>(null);
@@ -54,7 +55,7 @@ export function useLightboxAnimation(
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
   const phaseRef = useRef<LightboxPhase>("idle");
-  const currentIndexRef = useRef(lbIndex);
+  const currentIndexRef = useRef(0);
 
   const uiTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const mainTimelineRef = useRef<gsap.core.Timeline | null>(null);
@@ -166,9 +167,9 @@ export function useLightboxAnimation(
   const syncGalleryToIndex = useCallback(
     (index: number, offset?: number | null) => {
       window.dispatchEvent(new CustomEvent(GALLERY_SNAP_EVENT, { detail: { index, offset } }));
-      setActiveIndex(index);
+      onActiveIndexChange?.(index);
     },
-    [setActiveIndex],
+    [onActiveIndexChange],
   );
 
   const navigateTo = useCallback(
@@ -184,8 +185,9 @@ export function useLightboxAnimation(
 
       phaseRef.current = "sliding";
       currentIndexRef.current = nextIndex;
-      setLbIndex(nextIndex, direction);
-      setActiveIndex(nextIndex);
+
+      engineRef.current?.setLightboxState(true, nextIndex, direction);
+      onActiveIndexChange?.(nextIndex);
       syncGalleryToIndex(nextIndex);
 
       preloadAllImages();
@@ -208,8 +210,8 @@ export function useLightboxAnimation(
         );
       }
       if (crosses.length) {
-        uiTl.to(crossLeftRef.current, { rotation: leftTarget, duration: 0.74, ease: "power4.out" }, 0);
-        uiTl.to(crossRightRef.current, { rotation: rightTarget, duration: 0.74, ease: "power4.out" }, 0);
+        uiTl.to(crossLeftRef.current, { rotation: leftTarget, duration: 0.74, ease: "elastic.out(1, 0.5)" }, 0);
+        uiTl.to(crossRightRef.current, { rotation: rightTarget, duration: 0.74, ease: "elastic.out(1, 0.5)" }, 0);
       }
 
       uiTl.call(() => writeInfo(nextIndex), [], 0.24);
@@ -225,14 +227,17 @@ export function useLightboxAnimation(
         uiTimelineRef.current = null;
       });
     },
-    [createUITimeline, preloadAllImages, setActiveIndex, setLbIndex, syncGalleryToIndex, writeInfo],
+    [createUITimeline, onActiveIndexChange, preloadAllImages, syncGalleryToIndex, writeInfo],
   );
 
   const goToIndex = useCallback(
     (index: number) => {
       const currentIndex = currentIndexRef.current;
       if (index === currentIndex) return;
-      const direction: 1 | -1 = index > currentIndex ? 1 : -1;
+      const N = works.length;
+      const forwardDist = (index - currentIndex + N) % N;
+      const backwardDist = (currentIndex - index + N) % N;
+      const direction: 1 | -1 = forwardDist <= backwardDist ? 1 : -1;
       navigateTo(index, direction);
     },
     [navigateTo],
@@ -253,9 +258,10 @@ export function useLightboxAnimation(
         goToIndex(index);
         return;
       }
-      setActiveIndex(index);
-      setLbOpen(true);
-      setLbIndex(index, 1);
+      onActiveIndexChange?.(index);
+      setIsOpen(true);
+      onLightboxStateChange?.(true, index);
+      engineRef.current?.setLightboxState(true, index, 1);
 
       const lightbox = lightboxRef.current;
       if (!lightbox || !works[index]) return;
@@ -302,7 +308,6 @@ export function useLightboxAnimation(
       });
       mainTimelineRef.current = tl;
 
-      // Outer crosshair shrinks down neatly to scale: 0 simultaneously as 2 lightbox inner crosshairs appear
       if (outerCrosshair) {
         tl.to(
           outerCrosshair,
@@ -326,7 +331,7 @@ export function useLightboxAnimation(
       }
       tl.to(closeRef.current, { autoAlpha: 1, y: 0, duration: 0.36, ease: "power3.out" }, 0.4);
     },
-    [getOuterCrosshair, goToIndex, preloadAllImages, releaseWillChange, setActiveIndex, setLbIndex, setLbOpen, stopUI, writeInfo],
+    [getOuterCrosshair, goToIndex, onActiveIndexChange, onLightboxStateChange, preloadAllImages, releaseWillChange, stopUI, writeInfo],
   );
 
   const closeLightbox = useCallback(() => {
@@ -344,7 +349,9 @@ export function useLightboxAnimation(
     const fadeTargets = asElements(...text, ...crosses, closeRef.current);
 
     phaseRef.current = "closing";
-    setLbOpen(false);
+    setIsOpen(false);
+    onLightboxStateChange?.(false, index);
+    engineRef.current?.setLightboxState(false, index);
 
     syncGalleryToIndex(index);
     stopUI();
@@ -366,7 +373,6 @@ export function useLightboxAnimation(
       tl.to(restFade, { autoAlpha: 0, scale: 0.5, duration: 0.18, stagger: 0.03, ease: "power2.in" }, 0);
     }
 
-    // Outer crosshair expands back from scale: 0 -> 1 without fade (autoAlpha: 1) using expo.out ease
     if (outerCrosshair) {
       gsap.set(outerCrosshair, { autoAlpha: 1 });
       tl.fromTo(
@@ -379,9 +385,8 @@ export function useLightboxAnimation(
 
     tl.to(overlayRef.current, { autoAlpha: 0, duration: 0.2, ease: "power2.in" }, 0);
     tl.to(lightbox, { autoAlpha: 0, duration: 0.25, ease: "power2.in" }, 0.1);
-  }, [getOuterCrosshair, releaseWillChange, resetVisuals, setLbOpen, stopUI, syncGalleryToIndex]);
+  }, [getOuterCrosshair, onLightboxStateChange, releaseWillChange, resetVisuals, stopUI, syncGalleryToIndex]);
 
-  // Landing intro animation for outer gallery crosshair (scale pop with expo.out)
   useLayoutEffect(() => {
     const outerCrosshair = getOuterCrosshair();
     if (!outerCrosshair) return;
@@ -436,12 +441,30 @@ export function useLightboxAnimation(
     (event: MouseEvent<HTMLDivElement>) => {
       if (phaseRef.current === "idle" || phaseRef.current === "closing") return;
       if ((event.target as HTMLElement).closest("#lightbox-close")) return;
+
+      const engine = engineRef.current;
+      if (engine) {
+        const clickX = event.clientX;
+        const clickY = event.clientY;
+        const sw = window.innerWidth;
+        const sh = window.innerHeight;
+
+        const clickedDockIndex = engine.thumbnailDock.getSlotAtPointer(clickX, clickY, sw, sh);
+        const lbIdx = engine.lbIndex;
+
+        if (clickedDockIndex !== -1 && clickedDockIndex !== lbIdx) {
+          goToIndex(clickedDockIndex);
+          return;
+        }
+      }
+
       goToDirection(event.clientX > window.innerWidth / 2 ? 1 : -1);
     },
-    [goToDirection],
+    [goToDirection, goToIndex],
   );
 
   return {
+    engineRef,
     lightboxRef,
     overlayRef,
     crossLeftRef,
@@ -450,7 +473,7 @@ export function useLightboxAnimation(
     labelRef,
     counterRef,
     closeRef,
-    isOpen: lbOpen,
+    isOpen,
     openLightbox,
     goToIndex,
     goToDirection,

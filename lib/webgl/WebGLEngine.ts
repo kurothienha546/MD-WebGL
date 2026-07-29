@@ -1,7 +1,6 @@
 import { Renderer, Camera, Transform, Plane } from "ogl";
 import gsap from "gsap";
 import { works } from "@/lib/works";
-import { useSliderStore } from "@/store/useSliderStore";
 import { CardMesh } from "./CardMesh";
 import { LightboxStack } from "./LightboxStack";
 import { ThumbnailDock } from "./ThumbnailDock";
@@ -22,6 +21,8 @@ export interface WebGLEngineOptions {
   progressEl?: HTMLElement | null;
   cursorEl?: HTMLElement | null;
   isReducedMotion?: boolean;
+  onActiveIndexChange?: (index: number) => void;
+  onLightboxStateChange?: (open: boolean, index: number) => void;
 }
 
 export class WebGLEngine {
@@ -30,6 +31,8 @@ export class WebGLEngine {
   private openLightboxCb?: (index: number) => void;
   private progressEl?: HTMLElement | null;
   private cursorEl?: HTMLElement | null;
+  private onActiveIndexChangeCb?: (index: number) => void;
+  private onLightboxStateChangeCb?: (open: boolean, index: number) => void;
 
   public isReducedMotion = false;
   public renderer: Renderer;
@@ -39,6 +42,14 @@ export class WebGLEngine {
   public cardMeshes: CardMesh[] = [];
   public lightboxStack: LightboxStack;
   public thumbnailDock: ThumbnailDock;
+
+  public geometryBaseW = 0;
+  public geometryBaseH = 0;
+
+  // Pure Internal Lightbox State
+  public lbOpen = false;
+  public lbIndex = 0;
+  public lbDirection: 1 | -1 = 1;
 
   // Physics state
   public targetOffset = 0;
@@ -76,12 +87,25 @@ export class WebGLEngine {
   private onPointerDown?: (event: PointerEvent) => void;
   private onPointerMove?: (event: PointerEvent) => void;
   private onPointerUp?: (event: PointerEvent) => void;
+  private onPointerCancel?: (event: PointerEvent) => void;
   private onWheel?: (event: WheelEvent) => void;
+  private onContextLost?: (event: Event) => void;
+  private onContextRestored?: (event: Event) => void;
+  private onVisibilityChange?: () => void;
 
   private lastProgressScale = -1;
 
   constructor(options: WebGLEngineOptions) {
-    const { container, canvas, openLightbox, progressEl, cursorEl, isReducedMotion } = options;
+    const {
+      container,
+      canvas,
+      openLightbox,
+      progressEl,
+      cursorEl,
+      isReducedMotion,
+      onActiveIndexChange,
+      onLightboxStateChange
+    } = options;
 
     this.container = container;
     this.canvas = canvas;
@@ -89,6 +113,8 @@ export class WebGLEngine {
     this.progressEl = progressEl;
     this.cursorEl = cursorEl;
     this.isReducedMotion = !!isReducedMotion;
+    this.onActiveIndexChangeCb = onActiveIndexChange;
+    this.onLightboxStateChangeCb = onLightboxStateChange;
 
     this._lastOffsetForVelocity = 0;
     this._lastFrameTime = 0;
@@ -97,6 +123,9 @@ export class WebGLEngine {
 
     this.updateMetrics();
     const { screenWidth, screenHeight, cardWidth, cardHeight, stepDistance } = this.metrics;
+
+    this.geometryBaseW = cardWidth;
+    this.geometryBaseH = cardHeight;
 
     this.renderer = new Renderer({
       canvas: this.canvas,
@@ -127,7 +156,7 @@ export class WebGLEngine {
       heightSegments: 20,
     });
 
-    // Create CardMeshes & load ALL textures upfront immediately
+    // Create CardMeshes & load textures
     works.forEach((work, i) => {
       const baseX = i * stepDistance;
       const card = new CardMesh({
@@ -147,6 +176,13 @@ export class WebGLEngine {
     this.tickerFunc = () => this.tickPhysics();
     this.bindEvents();
     this.startRenderLoop();
+  }
+
+  public setLightboxState(open: boolean, index: number = this.lbIndex, direction: 1 | -1 = 1) {
+    this.lbOpen = open;
+    this.lbIndex = index;
+    this.lbDirection = direction;
+    this.onLightboxStateChangeCb?.(open, index);
   }
 
   public updateMetrics() {
@@ -244,11 +280,12 @@ export class WebGLEngine {
     const diff = this.targetOffset - this.currentOffset;
     const absDiff = Math.abs(diff);
 
-    if (absDiff < SETTLE_EPSILON_PX) {
+    // Disable SETTLE_EPSILON_PX settling during active drag to eliminate drag micro-snap jitter
+    if (!this.isDragging && absDiff < SETTLE_EPSILON_PX) {
       if (this.currentOffset !== this.targetOffset) {
         this.currentOffset = this.targetOffset;
       }
-      if (!this.isDragging) this.stopMotion();
+      this.stopMotion();
       return;
     }
 
@@ -271,7 +308,6 @@ export class WebGLEngine {
     const progress = minOffset === maxOffset ? 0 : (100 * (clamped - maxOffset)) / (minOffset - maxOffset);
     if (this.progressEl) {
       const newScale = Math.max(0, Math.min(1, progress / 100));
-      // Only write to DOM when changed significantly (> 0.1%)
       if (Math.abs(newScale - this.lastProgressScale) > 0.001) {
         this.progressEl.style.transform = `scaleX(${newScale})`;
         this.lastProgressScale = newScale;
@@ -291,13 +327,15 @@ export class WebGLEngine {
 
     if (this.activeIndex !== nearestIndex) {
       this.activeIndex = nearestIndex;
-      useSliderStore.getState().setActiveIndex(nearestIndex);
+      this.onActiveIndexChangeCb?.(nearestIndex);
     }
   }
 
   private startRenderLoop() {
+    if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
+
     const draw = (time: number) => {
-      // === VELOCITY COMPUTATION (frame-to-frame) ===
+      // Velocity computation across frame ticks
       const dt = this._lastFrameTime ? Math.min((time - this._lastFrameTime) / 1000, 0.1) : 0.016;
       this._lastFrameTime = time;
 
@@ -305,18 +343,27 @@ export class WebGLEngine {
       const instantV = offsetDelta / Math.max(dt, 0.001);
       this.velocity += (instantV - this.velocity) * 0.12;
       this._lastOffsetForVelocity = this.currentOffset;
-      // ==============================================
 
-      const isDragging = this.isDragging;
-      const storeState = useSliderStore.getState();
-      const lbIsOpen = storeState.lbOpen;
-      const lbIdx = storeState.lbIndex;
-      const lbDir = storeState.lbDirection;
+      const lbIsOpen = this.lbOpen;
+      const lbIdx = this.lbIndex;
+      const lbDir = this.lbDirection;
 
       this.onStoreStateChange(lbIsOpen, lbIdx, lbDir);
 
       const { screenWidth, screenHeight, cardWidth, cardHeight, stepDistance } = this.metrics;
       const { thumbWidth, thumbHeight, dockY, dockSlotsX } = this.thumbnailDock.metrics;
+
+      const baseW = this.geometryBaseW || cardWidth || 1;
+      const baseH = this.geometryBaseH || cardHeight || 1;
+
+      const scaleX = cardWidth / baseW;
+      const scaleY = cardHeight / baseH;
+
+      const fullScaleX = screenWidth / baseW;
+      const fullScaleY = screenHeight / baseH;
+
+      const dockScaleX = thumbWidth / baseW;
+      const dockScaleY = thumbHeight / baseH;
 
       const lbProg = this.lbProgress.current;
       const slideProg = this.lightboxStack.slideProgress.current;
@@ -327,16 +374,12 @@ export class WebGLEngine {
         card.setVelocity(this.velocity * (1 - lbProg));
 
         if (lbProg > 0.001) {
-          const fullScaleX = screenWidth / cardWidth;
-          const fullScaleY = screenHeight / cardHeight;
-
-          const dockScaleX = thumbWidth / cardWidth;
-          const dockScaleY = thumbHeight / cardHeight;
-
           const baseX = i * stepDistance;
           const galleryX = baseX + this.currentOffset;
-
           const dockX = dockSlotsX[i] ?? 0;
+
+          const galleryParallax = galleryX / (screenWidth * 0.5);
+          const blendParallax = galleryParallax * (1 - lbProg);
 
           if (i === lbIdx) {
             const slideOffsetX = lastDir * (1 - slideProg) * screenWidth;
@@ -345,10 +388,10 @@ export class WebGLEngine {
 
             const targetX = galleryX * (1 - lbProg) + targetX_full * lbProg;
             const targetY = 0 * (1 - lbProg) + targetY_full * lbProg;
-            const targetScaleX = 1.0 * (1 - lbProg) + fullScaleX * lbProg;
-            const targetScaleY = 1.0 * (1 - lbProg) + fullScaleY * lbProg;
+            const targetScaleX = scaleX * (1 - lbProg) + fullScaleX * lbProg;
+            const targetScaleY = scaleY * (1 - lbProg) + fullScaleY * lbProg;
 
-            card.setTransform(targetX, targetY, 50 * lbProg, targetScaleX, targetScaleY, 1.0, 0, 1.0);
+            card.setTransform(targetX, targetY, 50 * lbProg, targetScaleX, targetScaleY, 1.0, blendParallax, 1.0);
           } else if (i === prevIdx && slideProg < 0.999) {
             const slideOffsetX = -lastDir * slideProg * screenWidth;
             const targetX_full = slideOffsetX;
@@ -356,32 +399,30 @@ export class WebGLEngine {
 
             const targetX = galleryX * (1 - lbProg) + targetX_full * lbProg;
             const targetY = 0 * (1 - lbProg) + targetY_full * lbProg;
-            const targetScaleX = 1.0 * (1 - lbProg) + fullScaleX * lbProg;
-            const targetScaleY = 1.0 * (1 - lbProg) + fullScaleY * lbProg;
+            const targetScaleX = scaleX * (1 - lbProg) + fullScaleX * lbProg;
+            const targetScaleY = scaleY * (1 - lbProg) + fullScaleY * lbProg;
 
-            card.setTransform(targetX, targetY, 45 * lbProg, targetScaleX, targetScaleY, 1.0, 0, 1.0);
+            card.setTransform(targetX, targetY, 45 * lbProg, targetScaleX, targetScaleY, 1.0, blendParallax, 1.0);
           } else {
             const targetX = galleryX * (1 - lbProg) + dockX * lbProg;
             const targetY = 0 * (1 - lbProg) + dockY * lbProg;
-            const targetScaleX = 1.0 * (1 - lbProg) + dockScaleX * lbProg;
-            const targetScaleY = 1.0 * (1 - lbProg) + dockScaleY * lbProg;
+            const targetScaleX = scaleX * (1 - lbProg) + dockScaleX * lbProg;
+            const targetScaleY = scaleY * (1 - lbProg) + dockScaleY * lbProg;
 
             const isCurrentDockSlot = i === lbIdx;
             const targetOpacity = isCurrentDockSlot ? 0.35 : 1.0;
 
-            card.setTransform(targetX, targetY, 30 * lbProg, targetScaleX, targetScaleY, targetOpacity, 0, 1.0);
+            card.setTransform(targetX, targetY, 30 * lbProg, targetScaleX, targetScaleY, targetOpacity, blendParallax, 1.0);
           }
         } else {
-          // Normal gallery mode
+          // Normal gallery mode:
+          // this.currentOffset is ALREADY physics-lerped by tickPhysics.
+          // Passing lerpFactor = 1.0 prevents double-lerp lag completely.
           const baseX = i * stepDistance;
           const meshX = baseX + this.currentOffset;
           const parallaxX = meshX / (screenWidth * 0.5);
 
-          // Khi drag: bypass mesh lerp để tránh double lerp hunting
-          // Khi release/thả: dùng lerp mượt để glide vào vị trí
-          const meshLerp = isDragging ? 1.0 : 0.2;
-
-          card.setTransform(meshX, 0, 0, 1.0, 1.0, 1.0, parallaxX, meshLerp);
+          card.setTransform(meshX, 0, 0, scaleX, scaleY, 1.0, parallaxX, 1.0);
         }
       });
 
@@ -416,13 +457,16 @@ export class WebGLEngine {
 
     this.resizeObserver = new ResizeObserver(this.handleResize);
     this.resizeObserver.observe(this.container);
-    window.addEventListener("resize", this.handleResize);
 
-    // Pointer events
+    // Pointer events with Pointer Capture safety
     this.onPointerDown = (event: PointerEvent) => {
-      if (useSliderStore.getState().lbOpen || event.button !== 0) return;
+      if (this.lbOpen || event.button !== 0) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("a, button, input, textarea, #lightbox")) return;
+
+      try {
+        this.container.setPointerCapture(event.pointerId);
+      } catch { }
 
       this.stopMotion();
       this.targetOffset = this.currentOffset;
@@ -447,13 +491,13 @@ export class WebGLEngine {
         return;
       }
 
-      if (useSliderStore.getState().lbOpen) {
+      if (this.lbOpen) {
         const clickX = event.clientX;
         const clickY = event.clientY;
         const { screenWidth, screenHeight } = this.metrics;
 
         const slotIndex = this.thumbnailDock.getSlotAtPointer(clickX, clickY, screenWidth, screenHeight);
-        const lbIdx = useSliderStore.getState().lbIndex;
+        const lbIdx = this.lbIndex;
 
         if (slotIndex !== -1 && slotIndex !== lbIdx) {
           this.cursorEl?.classList.add("hover");
@@ -485,9 +529,14 @@ export class WebGLEngine {
     };
 
     this.onPointerUp = (event: PointerEvent) => {
-      const storeState = useSliderStore.getState();
-      const lbOpen = storeState.lbOpen;
-      const lbIdx = storeState.lbIndex;
+      try {
+        if (this.container.hasPointerCapture?.(event.pointerId)) {
+          this.container.releasePointerCapture(event.pointerId);
+        }
+      } catch { }
+
+      const lbOpen = this.lbOpen;
+      const lbIdx = this.lbIndex;
 
       if (lbOpen) {
         const clickX = event.clientX;
@@ -532,15 +581,64 @@ export class WebGLEngine {
       }
     };
 
+    this.onPointerCancel = (event: PointerEvent) => {
+      try {
+        if (this.container.hasPointerCapture?.(event.pointerId)) {
+          this.container.releasePointerCapture(event.pointerId);
+        }
+      } catch { }
+
+      if (this.isDragging && this.dragStart.pointerId === event.pointerId) {
+        this.isDragging = false;
+        this.cursorEl?.classList.remove("drag");
+      }
+    };
+
     this.onWheel = (event: WheelEvent) => {
-      if (useSliderStore.getState().lbOpen) return;
+      if (this.lbOpen) return;
       this.setMotionTarget(this.targetOffset - event.deltaY * WHEEL_MULTIPLIER);
+    };
+
+    // Context Loss & Recovery
+    this.onContextLost = (event: Event) => {
+      event.preventDefault();
+      if (this.animFrameId) {
+        cancelAnimationFrame(this.animFrameId);
+        this.animFrameId = null;
+      }
+    };
+
+    this.onContextRestored = () => {
+      if (!this.animFrameId) {
+        this._lastFrameTime = 0;
+        this.startRenderLoop();
+      }
+    };
+
+    // Tab Visibility Recovery
+    this.onVisibilityChange = () => {
+      if (document.hidden) {
+        if (this.animFrameId) {
+          cancelAnimationFrame(this.animFrameId);
+          this.animFrameId = null;
+        }
+      } else {
+        if (!this.animFrameId) {
+          this._lastFrameTime = 0;
+          this.startRenderLoop();
+        }
+      }
     };
 
     this.container.addEventListener("pointerdown", this.onPointerDown);
     this.container.addEventListener("pointermove", this.onPointerMove);
     this.container.addEventListener("pointerup", this.onPointerUp);
+    this.container.addEventListener("pointercancel", this.onPointerCancel);
     this.container.addEventListener("wheel", this.onWheel, { passive: true });
+
+    this.canvas.addEventListener("webglcontextlost", this.onContextLost);
+    this.canvas.addEventListener("webglcontextrestored", this.onContextRestored);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
   }
 
   public destroy() {
@@ -548,14 +646,20 @@ export class WebGLEngine {
     if (this.resizeTimer) clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();
 
-    if (typeof window !== "undefined" && this.handleResize) {
-      window.removeEventListener("resize", this.handleResize);
+    if (this.canvas) {
+      if (this.onContextLost) this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+      if (this.onContextRestored) this.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
+    }
+
+    if (typeof document !== "undefined" && this.onVisibilityChange) {
+      document.removeEventListener("visibilitychange", this.onVisibilityChange);
     }
 
     if (this.container) {
       if (this.onPointerDown) this.container.removeEventListener("pointerdown", this.onPointerDown);
       if (this.onPointerMove) this.container.removeEventListener("pointermove", this.onPointerMove);
       if (this.onPointerUp) this.container.removeEventListener("pointerup", this.onPointerUp);
+      if (this.onPointerCancel) this.container.removeEventListener("pointercancel", this.onPointerCancel);
       if (this.onWheel) this.container.removeEventListener("wheel", this.onWheel);
     }
 
@@ -564,6 +668,10 @@ export class WebGLEngine {
     this.cardMeshes.forEach((card) => {
       card.destroy();
     });
+
+    try {
+      (this.planeGeometry as any)?.remove?.();
+    } catch { }
 
     const gl = this.renderer?.gl;
     const loseContext = gl?.getExtension("WEBGL_lose_context");

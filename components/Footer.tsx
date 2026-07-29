@@ -3,14 +3,13 @@
 import { useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { works } from "@/lib/works";
-import { useSliderStore } from "@/store/useSliderStore";
 
 interface FooterProps {
   activeIndex: number;
+  lbOpen?: boolean;
 }
 
-export default function Footer({ activeIndex }: FooterProps) {
-  const lbOpen = useSliderStore((state) => state.lbOpen);
+export default function Footer({ activeIndex, lbOpen = false }: FooterProps) {
   const safeIdx = useMemo(() => {
     if (activeIndex < 0) return 0;
     if (activeIndex >= works.length) return works.length - 1;

@@ -1,9 +1,10 @@
 "use client";
-import { useSliderStore } from "@/store/useSliderStore";
 
-export default function Header() {
-  const lbOpen = useSliderStore((state) => state.lbOpen);
+interface HeaderProps {
+  lbOpen?: boolean;
+}
 
+export default function Header({ lbOpen = false }: HeaderProps) {
   return (
     <header
       className={`fixed top-0 left-0 right-0 px-[52px] py-[38px] flex justify-between items-center z-[200] transition-opacity duration-300 ${

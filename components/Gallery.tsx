@@ -3,14 +3,25 @@
 import { useRef } from "react";
 import type { MutableRefObject, RefObject } from "react";
 import WebGLGallery from "./WebGLGallery";
+import type { WebGLEngine } from "@/lib/webgl/WebGLEngine";
 
 interface GalleryProps {
   snapRef: MutableRefObject<number | null>;
   openLightbox?: (index: number) => void;
   cursorRef?: RefObject<HTMLElement | null>;
+  engineRef?: MutableRefObject<WebGLEngine | null>;
+  onActiveIndexChange?: (index: number) => void;
+  onLightboxStateChange?: (open: boolean, index: number) => void;
 }
 
-export default function Gallery({ snapRef, openLightbox, cursorRef }: GalleryProps) {
+export default function Gallery({
+  snapRef,
+  openLightbox,
+  cursorRef,
+  engineRef,
+  onActiveIndexChange,
+  onLightboxStateChange,
+}: GalleryProps) {
   const crosshairRef = useRef<HTMLDivElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
 
@@ -31,6 +42,9 @@ export default function Gallery({ snapRef, openLightbox, cursorRef }: GalleryPro
         cursorRef={cursorRef}
         crosshairRef={crosshairRef}
         progressRef={progressRef}
+        engineRef={engineRef}
+        onActiveIndexChange={onActiveIndexChange}
+        onLightboxStateChange={onLightboxStateChange}
       />
 
       <div

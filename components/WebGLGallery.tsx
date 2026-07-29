@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 import type { RefObject, MutableRefObject } from "react";
 import { works } from "@/lib/works";
-import { useSliderStore } from "@/store/useSliderStore";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { WebGLEngine } from "@/lib/webgl/WebGLEngine";
 import { GALLERY_SNAP_EVENT } from "@/lib/constants";
@@ -14,6 +13,9 @@ interface WebGLGalleryProps {
   cursorRef?: RefObject<HTMLElement | null>;
   crosshairRef?: RefObject<HTMLElement | null>;
   progressRef?: RefObject<HTMLElement | null>;
+  engineRef?: MutableRefObject<WebGLEngine | null>;
+  onActiveIndexChange?: (index: number) => void;
+  onLightboxStateChange?: (open: boolean, index: number) => void;
 }
 
 interface GallerySnapDetail {
@@ -26,10 +28,13 @@ export default function WebGLGallery({
   openLightbox,
   cursorRef,
   progressRef,
+  engineRef: externalEngineRef,
+  onActiveIndexChange,
+  onLightboxStateChange,
 }: WebGLGalleryProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const engineRef = useRef<WebGLEngine | null>(null);
+  const internalEngineRef = useRef<WebGLEngine | null>(null);
 
   const reducedMotion = useReducedMotion();
 
@@ -45,8 +50,11 @@ export default function WebGLGallery({
       progressEl: progressRef?.current,
       cursorEl: cursorRef?.current || document.getElementById("cursor"),
       isReducedMotion: reducedMotion,
+      onActiveIndexChange,
+      onLightboxStateChange,
     });
-    engineRef.current = engine;
+    internalEngineRef.current = engine;
+    if (externalEngineRef) externalEngineRef.current = engine;
 
     const onGallerySnap = (event: Event) => {
       const detail = (event as CustomEvent<GallerySnapDetail>).detail;
@@ -55,7 +63,7 @@ export default function WebGLGallery({
       const requestedOffset =
         typeof detail.offset === "number" ? detail.offset : engine.metrics.centers[detail.index];
       engine.syncOffset(requestedOffset);
-      useSliderStore.getState().setActiveIndex(detail.index);
+      onActiveIndexChange?.(detail.index);
       snapRef.current = null;
     };
 
@@ -63,9 +71,11 @@ export default function WebGLGallery({
 
     return () => {
       window.removeEventListener(GALLERY_SNAP_EVENT, onGallerySnap);
+      if (externalEngineRef) externalEngineRef.current = null;
+      internalEngineRef.current = null;
       engine.destroy();
     };
-  }, [cursorRef, openLightbox, progressRef, reducedMotion, snapRef]);
+  }, [cursorRef, externalEngineRef, onActiveIndexChange, onLightboxStateChange, openLightbox, progressRef, reducedMotion, snapRef]);
 
   return (
     <div
