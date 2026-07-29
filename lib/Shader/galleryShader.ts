@@ -35,25 +35,22 @@ export const fragmentShader = /* glsl */ `
 
   varying vec2 vUv;
 
-  vec2 getCoverUv(vec2 uv, vec2 planeSize, vec2 imageSize) {
-    vec2 ratio = vec2(
-      min((planeSize.x / planeSize.y) / (imageSize.x / imageSize.y), 1.0),
-      min((planeSize.y / planeSize.x) / (imageSize.y / imageSize.x), 1.0)
-    );
-    return vec2(
-      uv.x * ratio.x + (1.0 - ratio.x) * 0.5,
-      uv.y * ratio.y + (1.0 - ratio.y) * 0.5
-    );
-  }
-
   void main() {
-    vec2 uv = getCoverUv(vUv, uPlaneSizes, uImageSizes);
+    // 1. Chống lỗi chia cho 0 khi Plane scale về 0 lúc đóng/mở Lightbox
+    vec2 planeSize = max(uPlaneSizes, vec2(0.001));
+    vec2 imageSize = max(uImageSizes, vec2(0.001));
 
-    // Parallax shift in X direction (1.15x scale margin to prevent dark edges)
-    vec2 parallaxUv = (uv - 0.5) / 1.15 + 0.5;
-    parallaxUv.x += uParallaxX * 0.12;
+    // 2. Cover-fit chuẩn tỷ lệ 1:1 (bỏ hoàn toàn 1.15x zoom)
+    vec2 s = planeSize / imageSize;
+    float maxScale = max(s.x, s.y);
+    vec2 uvScale = planeSize / (imageSize * maxScale);
+    
+    vec2 uv = (vUv - 0.5) * uvScale + 0.5;
+    
+    // 3. Parallax shift trực tiếp
+    uv.x += uParallaxX * 0.12;
 
-    vec4 color = texture2D(tMap, parallaxUv);
+    vec4 color = texture2D(tMap, uv);
     color.a *= uOpacity;
 
     gl_FragColor = color;

@@ -1,6 +1,6 @@
 import { Mesh, Program, Plane, Texture, Transform } from "ogl";
 import type { OGLRenderingContext } from "ogl";
-import { vertexShader, fragmentShader } from "./shaders/galleryShader";
+import { fragmentShader, vertexShader } from "../Shader/galleryShader";
 
 export interface CardMeshOptions {
   gl: OGLRenderingContext;
@@ -12,6 +12,7 @@ export interface CardMeshOptions {
   cardHeight: number;
   baseX: number;
 }
+
 
 export class CardMesh {
   public index: number;
@@ -74,7 +75,6 @@ export class CardMesh {
     img.crossOrigin = "anonymous";
     img.src = this.src;
 
-    // Sử dụng addEventListener kèm signal từ AbortController
     const { signal } = this.abortController;
 
     img.addEventListener(
@@ -116,40 +116,33 @@ export class CardMesh {
     scaleX: number,
     scaleY: number,
     opacity: number,
-    parallaxX: number,
-    lerpFactor = 0.2
+    parallaxX: number
   ) {
-    this.mesh.position.x += (x - this.mesh.position.x) * lerpFactor;
-    this.mesh.position.y += (y - this.mesh.position.y) * lerpFactor;
-    this.mesh.position.z += (z - this.mesh.position.z) * lerpFactor;
+    this.mesh.position.set(x, y, z);
+    this.mesh.scale.set(scaleX, scaleY, 1.0);
 
-    this.mesh.scale.x += (scaleX - this.mesh.scale.x) * lerpFactor;
-    this.mesh.scale.y += (scaleY - this.mesh.scale.y) * lerpFactor;
+    this.program.uniforms.uOpacity.value = opacity;
 
-    this.program.uniforms.uOpacity.value +=
-      (opacity - this.program.uniforms.uOpacity.value) * lerpFactor;
-    this.program.uniforms.uParallaxX.value +=
-      (parallaxX - this.program.uniforms.uParallaxX.value) * lerpFactor;
+    const clampedParallax = Math.min(Math.max(parallaxX, -1.2), 1.2);
+    this.program.uniforms.uParallaxX.value = clampedParallax;
 
-    this.program.uniforms.uPlaneSizes.value[0] = this.cardWidth * this.mesh.scale.x;
-    this.program.uniforms.uPlaneSizes.value[1] = this.cardHeight * this.mesh.scale.y;
+    const uPlane = this.program.uniforms.uPlaneSizes.value;
+    uPlane[0] = this.cardWidth * scaleX;
+    uPlane[1] = this.cardHeight * scaleY;
   }
 
   public setVelocity(v: number) {
-    this.program.uniforms.uVelocity.value = v;
+    this.program.uniforms.uVelocity.value = Math.min(Math.max(v, -10.0), 10.0);
   }
 
   public destroy() {
-    // 1. Hủy toàn bộ event listeners đang chờ của Image
     this.abortController.abort();
 
-    // 2. Cắt đứt src của Image nếu đang tải dở để Browser ngắt download ngay lập tức
     if (this.currentImage) {
       this.currentImage.src = "";
       this.currentImage = null;
     }
 
-    // 3. Cleanup OGL / WebGL resources
     const gl = (this.program as any).gl as WebGLRenderingContext | OGLRenderingContext | undefined;
     if (gl) {
       if (this.texture?.texture) {

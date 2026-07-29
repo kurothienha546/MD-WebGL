@@ -30,7 +30,7 @@ export default function Gallery({
       <div
         ref={crosshairRef}
         id="crosshair"
-        className="pointer-events-none fixed left-1/2 top-1/2 z-[3000] h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 max-md:hidden"
+        className="pointer-events-none fixed left-1/2 top-1/2 z-[3000] h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 max-md:hidden [transform:translateZ(0)] will-change-[transform,opacity]"
       >
         <div className="absolute left-1/2 top-0 h-full w-[1.5px] -translate-x-1/2 rounded-sm bg-text" />
         <div className="absolute left-0 top-1/2 h-[1.5px] w-full -translate-y-1/2 rounded-sm bg-text" />

@@ -94,6 +94,7 @@ export class WebGLEngine {
   private onVisibilityChange?: () => void;
 
   private lastProgressScale = -1;
+  private pointerHistory: Array<{ x: number; time: number }> = [];
 
   constructor(options: WebGLEngineOptions) {
     const {
@@ -371,7 +372,8 @@ export class WebGLEngine {
       const prevIdx = this.lightboxStack.prevIdx;
 
       this.cardMeshes.forEach((card, i) => {
-        card.setVelocity(this.velocity * (1 - lbProg));
+      const cardV = Math.min(Math.max(this.velocity * (1 - lbProg), -10), 10);
+      card.setVelocity(cardV);
 
         if (lbProg > 0.001) {
           const baseX = i * stepDistance;
@@ -391,7 +393,7 @@ export class WebGLEngine {
             const targetScaleX = scaleX * (1 - lbProg) + fullScaleX * lbProg;
             const targetScaleY = scaleY * (1 - lbProg) + fullScaleY * lbProg;
 
-            card.setTransform(targetX, targetY, 50 * lbProg, targetScaleX, targetScaleY, 1.0, blendParallax, 1.0);
+            card.setTransform(targetX, targetY, 50 * lbProg, targetScaleX, targetScaleY, 1.0, blendParallax);
           } else if (i === prevIdx && slideProg < 0.999) {
             const slideOffsetX = -lastDir * slideProg * screenWidth;
             const targetX_full = slideOffsetX;
@@ -402,7 +404,7 @@ export class WebGLEngine {
             const targetScaleX = scaleX * (1 - lbProg) + fullScaleX * lbProg;
             const targetScaleY = scaleY * (1 - lbProg) + fullScaleY * lbProg;
 
-            card.setTransform(targetX, targetY, 45 * lbProg, targetScaleX, targetScaleY, 1.0, blendParallax, 1.0);
+            card.setTransform(targetX, targetY, 45 * lbProg, targetScaleX, targetScaleY, 1.0, blendParallax);
           } else {
             const targetX = galleryX * (1 - lbProg) + dockX * lbProg;
             const targetY = 0 * (1 - lbProg) + dockY * lbProg;
@@ -412,17 +414,14 @@ export class WebGLEngine {
             const isCurrentDockSlot = i === lbIdx;
             const targetOpacity = isCurrentDockSlot ? 0.35 : 1.0;
 
-            card.setTransform(targetX, targetY, 30 * lbProg, targetScaleX, targetScaleY, targetOpacity, blendParallax, 1.0);
+            card.setTransform(targetX, targetY, 30 * lbProg, targetScaleX, targetScaleY, targetOpacity, blendParallax);
           }
         } else {
-          // Normal gallery mode:
-          // this.currentOffset is ALREADY physics-lerped by tickPhysics.
-          // Passing lerpFactor = 1.0 prevents double-lerp lag completely.
           const baseX = i * stepDistance;
           const meshX = baseX + this.currentOffset;
           const parallaxX = meshX / (screenWidth * 0.5);
 
-          card.setTransform(meshX, 0, 0, scaleX, scaleY, 1.0, parallaxX, 1.0);
+          card.setTransform(meshX, 0, 0, scaleX, scaleY, 1.0, parallaxX);
         }
       });
 
@@ -477,6 +476,9 @@ export class WebGLEngine {
         startOffset: this.currentOffset,
         didMove: false,
       };
+
+      this.pointerHistory = [{ x: event.clientX, time: performance.now() }];
+
       this.beginMotion();
       this.cursorEl?.classList.add("drag");
       this.cursorEl?.classList.remove("hover");
@@ -484,8 +486,13 @@ export class WebGLEngine {
 
     this.onPointerMove = (event: PointerEvent) => {
       if (this.isDragging && this.dragStart.pointerId === event.pointerId) {
+        const now = performance.now();
+        this.pointerHistory.push({ x: event.clientX, time: now });
+        this.pointerHistory = this.pointerHistory.filter((pt) => now - pt.time < 80);
+
         const delta = event.clientX - this.dragStart.startX;
         if (Math.abs(delta) > DRAG_MOVE_THRESHOLD_PX) this.dragStart.didMove = true;
+
         this.targetOffset = this.clampOffset(this.dragStart.startOffset + delta);
         this.beginMotion();
         return;
@@ -558,6 +565,7 @@ export class WebGLEngine {
       this.cursorEl?.classList.remove("drag");
 
       const isClick = !this.dragStart.didMove || Math.abs(event.clientX - this.dragStart.startX) < CLICK_DISTANCE_THRESHOLD_PX;
+
       if (isClick) {
         const clickX = event.clientX;
         const clickY = event.clientY;
@@ -578,6 +586,23 @@ export class WebGLEngine {
 
         const targetIndex = clickedIndex !== -1 ? clickedIndex : this.activeIndex;
         if (this.openLightboxCb) this.openLightboxCb(targetIndex);
+      } else {
+        // --- TRƯỢT QUÁN TÍNH TỰ DO (NO SNAP) ---
+        let velocity = 0;
+        if (this.pointerHistory.length >= 2) {
+          const first = this.pointerHistory[0];
+          const last = this.pointerHistory[this.pointerHistory.length - 1];
+          const dt = (last.time - first.time) / 1000;
+          if (dt > 0.001) {
+            velocity = (last.x - first.x) / dt;
+          }
+        }
+
+        const MOMENTUM_MULTIPLIER = 0.20;
+        const maxGlide = this.metrics.stepDistance * 1.5;
+        const glideDelta = Math.min(Math.max(velocity * MOMENTUM_MULTIPLIER, -maxGlide), maxGlide);
+
+        this.setMotionTarget(this.currentOffset + glideDelta);
       }
     };
 
