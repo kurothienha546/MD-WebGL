@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { works } from "@/lib/works";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { UseLightboxAnimationResult } from "@/hooks/useLightboxAnimation";
 
@@ -12,11 +11,15 @@ interface LightboxProps {
 
 export default function Lightbox({ animation }: LightboxProps) {
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [hasCustomCursor, setHasCustomCursor] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setHasCustomCursor(Boolean(document.getElementById("cursor")));
+  }, []);
 
   const {
     lightboxRef,
-    stageRef,
     overlayRef,
     crossLeftRef,
     crossRightRef,
@@ -24,16 +27,14 @@ export default function Lightbox({ animation }: LightboxProps) {
     labelRef,
     counterRef,
     closeRef,
-    slides,
-    registerSlideWrap,
-    registerSlideImg,
     isOpen,
-    openLightbox: _openLightbox,
     closeLightbox,
     handleStageClick,
   } = animation;
 
   useFocusTrap(lightboxRef, isOpen, closeRef);
+
+  const cursorClass = hasCustomCursor ? "cursor-none" : "";
 
   const content = (
     <div
@@ -45,31 +46,8 @@ export default function Lightbox({ animation }: LightboxProps) {
       aria-hidden={!isOpen}
       tabIndex={-1}
       onClick={handleStageClick}
-      className="fixed left-0 top-0 z-[2000] h-0 w-0 invisible overflow-hidden bg-bg pointer-events-none cursor-none outline-none max-md:cursor-auto"
+      className={`fixed left-0 top-0 z-[2000] h-0 w-0 invisible overflow-hidden bg-transparent pointer-events-none ${cursorClass} outline-none max-md:cursor-auto`}
     >
-      <div ref={stageRef} id="lb-stage" className="absolute inset-0 overflow-hidden">
-        {slides.map((slide) => {
-          const work = works[slide.index];
-          return (
-            <div
-              key={slide.id}
-              ref={registerSlideWrap(slide.id)}
-              className="absolute inset-0 overflow-hidden"
-              style={{ zIndex: slide.z }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                ref={registerSlideImg(slide.id)}
-                src={work?.src}
-                alt={work?.title ?? ""}
-                draggable={false}
-                className="absolute inset-0 h-full w-full object-cover select-none"
-              />
-            </div>
-          );
-        })}
-      </div>
-
       <div
         ref={overlayRef}
         id="lightbox-overlay"
@@ -126,7 +104,7 @@ export default function Lightbox({ animation }: LightboxProps) {
           event.stopPropagation();
           closeLightbox();
         }}
-        className="absolute right-[52px] top-9 z-[30] border-0 bg-transparent p-0 font-mono text-[0.55rem] uppercase tracking-[0.22em] text-white mix-blend-difference cursor-none outline-none hover:opacity-70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white/70 focus-visible:outline-offset-4 max-md:cursor-auto"
+        className={`absolute right-[52px] top-9 z-[30] border-0 bg-transparent p-0 font-mono text-[0.55rem] uppercase tracking-[0.22em] text-white mix-blend-difference ${cursorClass} outline-none hover:opacity-70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white/70 focus-visible:outline-offset-4 max-md:cursor-auto`}
       >
         Close — Esc
       </button>

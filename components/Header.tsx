@@ -1,9 +1,14 @@
 "use client";
+import { useSliderStore } from "@/store/useSliderStore";
+
 export default function Header() {
+  const lbOpen = useSliderStore((state) => state.lbOpen);
+
   return (
     <header
-      className="fixed top-0 left-0 right-0 px-[52px] py-[38px] flex justify-between items-center z-[200] opacity-0"
-      style={{ animation: "fadeUp 1s .2s cubic-bezier(.23,1,.32,1) forwards" }}
+      className={`fixed top-0 left-0 right-0 px-[52px] py-[38px] flex justify-between items-center z-[200] transition-opacity duration-300 ${
+        lbOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+      }`}
     >
       <div className="font-serif font-light text-[0.95rem] text-text tracking-[0.22em] uppercase">
         Mỹ Duyên

@@ -160,21 +160,3 @@
     height: 50vmin !important;
   }
 }
-
-.image-wrap,
-.image {
-  /* Mẹo lấp đầy viền subpixel lẻ, triệt tiêu 99% hiện tượng rung viền Shimmer */
-  outline: 1px solid transparent;
-  box-shadow: 0 0 1px transparent;
-
-  /* Giữ Layer GPU ổn định tuyệt đối */
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transform-style: preserve-3d;
-}
-
-.image-wrap:focus,
-.image-wrap:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-}

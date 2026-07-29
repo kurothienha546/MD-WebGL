@@ -3,12 +3,14 @@
 import { useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { works } from "@/lib/works";
+import { useSliderStore } from "@/store/useSliderStore";
 
 interface FooterProps {
   activeIndex: number;
 }
 
 export default function Footer({ activeIndex }: FooterProps) {
+  const lbOpen = useSliderStore((state) => state.lbOpen);
   const safeIdx = useMemo(() => {
     if (activeIndex < 0) return 0;
     if (activeIndex >= works.length) return works.length - 1;
@@ -21,11 +23,9 @@ export default function Footer({ activeIndex }: FooterProps) {
 
   return (
     <footer
-      className="fixed bottom-0 left-0 right-0 px-[52px] pb-11 flex justify-between items-end z-[200] pointer-events-none max-md:px-6 max-md:pb-6"
-      style={{
-        opacity: 0,
-        animation: "fadeUp 1s .9s cubic-bezier(.23,1,.32,1) forwards",
-      }}
+      className={`fixed bottom-0 left-0 right-0 px-[52px] pb-11 flex justify-between items-end z-[200] pointer-events-none transition-opacity duration-300 max-md:px-6 max-md:pb-6 ${
+        lbOpen ? "opacity-0" : "opacity-100"
+      }`}
     >
       {/* Caption Section */}
       <div className="caption max-w-[340px]">
