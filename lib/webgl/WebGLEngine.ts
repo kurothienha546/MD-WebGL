@@ -288,6 +288,7 @@ export class WebGLEngine {
 
   private startRenderLoop() {
     const draw = () => {
+      const isDragging = this.isDragging;
       const storeState = useSliderStore.getState();
       const lbIsOpen = storeState.lbOpen;
       const lbIdx = storeState.lbIndex;
@@ -352,11 +353,16 @@ export class WebGLEngine {
             card.setTransform(targetX, targetY, 30 * lbProg, targetScaleX, targetScaleY, targetOpacity, 0, 1.0);
           }
         } else {
+          // Normal gallery mode
           const baseX = i * stepDistance;
           const meshX = baseX + this.currentOffset;
           const parallaxX = meshX / (screenWidth * 0.5);
 
-          card.setTransform(meshX, 0, 0, 1.0, 1.0, 1.0, parallaxX, 0.2);
+          // Khi drag: bypass mesh lerp để tránh double lerp hunting
+          // Khi release/thả: dùng lerp mượt để glide vào vị trí
+          const meshLerp = isDragging ? 1.0 : 0.2;
+
+          card.setTransform(meshX, 0, 0, 1.0, 1.0, 1.0, parallaxX, meshLerp);
         }
       });
 
