@@ -44,6 +44,8 @@ export class WebGLEngine {
   public targetOffset = 0;
   public currentOffset = 0;
   public velocity = 0;
+  private _lastOffsetForVelocity = 0;
+  private _lastFrameTime = 0;
   public activeIndex = 0;
   public isDragging = false;
   public dragStart = { pointerId: -1, startX: 0, startOffset: 0, didMove: false };
@@ -76,6 +78,8 @@ export class WebGLEngine {
   private onPointerUp?: (event: PointerEvent) => void;
   private onWheel?: (event: WheelEvent) => void;
 
+  private lastProgressScale = -1;
+
   constructor(options: WebGLEngineOptions) {
     const { container, canvas, openLightbox, progressEl, cursorEl, isReducedMotion } = options;
 
@@ -86,6 +90,8 @@ export class WebGLEngine {
     this.cursorEl = cursorEl;
     this.isReducedMotion = !!isReducedMotion;
 
+    this._lastOffsetForVelocity = 0;
+    this._lastFrameTime = 0;
     this.lightboxStack = new LightboxStack();
     this.thumbnailDock = new ThumbnailDock();
 
@@ -203,6 +209,7 @@ export class WebGLEngine {
     this.isDragging = false;
     this.currentOffset = synced;
     this.targetOffset = synced;
+    this._lastOffsetForVelocity = synced;
   }
 
   public onStoreStateChange(lbOpen: boolean, lbIdx: number, lbDir: 1 | -1 = 1) {
@@ -241,7 +248,6 @@ export class WebGLEngine {
       if (this.currentOffset !== this.targetOffset) {
         this.currentOffset = this.targetOffset;
       }
-      this.velocity = 0;
       if (!this.isDragging) this.stopMotion();
       return;
     }
@@ -251,9 +257,7 @@ export class WebGLEngine {
       ease = Math.max(ease, 0.22);
     }
 
-    const prevOffset = this.currentOffset;
     this.currentOffset += diff * ease;
-    this.velocity = (this.currentOffset - prevOffset) * 60;
     this.updateProgressAndActive();
   }
 
@@ -266,7 +270,12 @@ export class WebGLEngine {
     // Update Progress bar
     const progress = minOffset === maxOffset ? 0 : (100 * (clamped - maxOffset)) / (minOffset - maxOffset);
     if (this.progressEl) {
-      gsap.set(this.progressEl, { scaleX: Math.max(0, Math.min(1, progress / 100)) });
+      const newScale = Math.max(0, Math.min(1, progress / 100));
+      // Only write to DOM when changed significantly (> 0.1%)
+      if (Math.abs(newScale - this.lastProgressScale) > 0.001) {
+        this.progressEl.style.transform = `scaleX(${newScale})`;
+        this.lastProgressScale = newScale;
+      }
     }
 
     // Nearest index
@@ -287,7 +296,17 @@ export class WebGLEngine {
   }
 
   private startRenderLoop() {
-    const draw = () => {
+    const draw = (time: number) => {
+      // === VELOCITY COMPUTATION (frame-to-frame) ===
+      const dt = this._lastFrameTime ? Math.min((time - this._lastFrameTime) / 1000, 0.1) : 0.016;
+      this._lastFrameTime = time;
+
+      const offsetDelta = this.currentOffset - this._lastOffsetForVelocity;
+      const instantV = offsetDelta / Math.max(dt, 0.001);
+      this.velocity += (instantV - this.velocity) * 0.12;
+      this._lastOffsetForVelocity = this.currentOffset;
+      // ==============================================
+
       const isDragging = this.isDragging;
       const storeState = useSliderStore.getState();
       const lbIsOpen = storeState.lbOpen;
