@@ -6,7 +6,7 @@ import {
   useLayoutEffect,
   useRef,
 } from "react";
-import type { MouseEvent, MutableRefObject } from "react";
+import type { MouseEvent, MutableRefObject, RefObject } from "react";
 import gsap from "gsap";
 import { works } from "@/lib/works";
 import { useSliderStore } from "@/store/useSliderStore";
@@ -36,6 +36,7 @@ export interface UseLightboxAnimationResult {
 
 export function useLightboxAnimation(
   _snapRef: MutableRefObject<number | null>,
+  outerCrosshairRef?: RefObject<HTMLElement | null>,
 ): UseLightboxAnimationResult {
   const lbOpen = useSliderStore((state) => state.lbOpen);
   const lbIndex = useSliderStore((state) => state.lbIndex);
@@ -60,6 +61,13 @@ export function useLightboxAnimation(
   const lastNavAtRef = useRef(0);
   const crossRotationRef = useRef<[number, number]>([0, 0]);
   const preloadedRef = useRef<Set<string>>(new Set());
+
+  const getOuterCrosshair = useCallback((): HTMLElement | null => {
+    return (
+      outerCrosshairRef?.current ??
+      (typeof document !== "undefined" ? document.getElementById("crosshair") : null)
+    );
+  }, [outerCrosshairRef]);
 
   const releaseWillChange = useCallback((...targets: Array<Element | null | undefined>) => {
     const valid = targets.filter((t): t is Element => Boolean(t));
@@ -148,7 +156,12 @@ export function useLightboxAnimation(
     gsap.set(titleRef.current, { autoAlpha: 0, xPercent: -50, yPercent: -50, y: 34 });
     gsap.set([labelRef.current, counterRef.current], { autoAlpha: 0, xPercent: -50, y: 28 });
     gsap.set(closeRef.current, { autoAlpha: 0, y: 10 });
-  }, []);
+
+    const outerCrosshair = getOuterCrosshair();
+    if (outerCrosshair && phaseRef.current === "idle") {
+      gsap.set(outerCrosshair, { autoAlpha: 1, scale: 1, xPercent: -50, yPercent: -50 });
+    }
+  }, [getOuterCrosshair]);
 
   const syncGalleryToIndex = useCallback(
     (index: number, offset?: number | null) => {
@@ -252,6 +265,8 @@ export function useLightboxAnimation(
 
       const text = asElements(titleRef.current, labelRef.current, counterRef.current);
       const crosses = asElements(crossLeftRef.current, crossRightRef.current);
+      const outerCrosshair = getOuterCrosshair();
+
       phaseRef.current = "opening";
       currentIndexRef.current = index;
       crossRotationRef.current = [0, 0];
@@ -287,6 +302,15 @@ export function useLightboxAnimation(
       });
       mainTimelineRef.current = tl;
 
+      // Outer crosshair shrinks down neatly to scale: 0 simultaneously as 2 lightbox inner crosshairs appear
+      if (outerCrosshair) {
+        tl.to(
+          outerCrosshair,
+          { scale: 0, autoAlpha: 0, xPercent: -50, yPercent: -50, duration: 0.35, ease: "expo.out" },
+          0.1,
+        );
+      }
+
       tl.to(overlayRef.current, { autoAlpha: 1, duration: 0.36, ease: "power2.out" }, 0.2);
 
       if (text.length) {
@@ -296,13 +320,13 @@ export function useLightboxAnimation(
         tl.fromTo(
           crosses,
           { autoAlpha: 0, scale: 0, yPercent: -50, rotation: 0 },
-          { autoAlpha: 1, scale: 1, duration: 0.55, stagger: 0.06, ease: "power3.out" },
-          0.3,
+          { autoAlpha: 1, scale: 1, duration: 0.55, stagger: 0.06, ease: "expo.out" },
+          0.1,
         );
       }
       tl.to(closeRef.current, { autoAlpha: 1, y: 0, duration: 0.36, ease: "power3.out" }, 0.4);
     },
-    [goToIndex, preloadAllImages, releaseWillChange, setActiveIndex, setLbIndex, setLbOpen, stopUI, writeInfo],
+    [getOuterCrosshair, goToIndex, preloadAllImages, releaseWillChange, setActiveIndex, setLbIndex, setLbOpen, stopUI, writeInfo],
   );
 
   const closeLightbox = useCallback(() => {
@@ -316,6 +340,7 @@ export function useLightboxAnimation(
     const index = currentIndexRef.current;
     const text = asElements(titleRef.current, labelRef.current, counterRef.current);
     const crosses = asElements(crossLeftRef.current, crossRightRef.current);
+    const outerCrosshair = getOuterCrosshair();
     const fadeTargets = asElements(...text, ...crosses, closeRef.current);
 
     phaseRef.current = "closing";
@@ -341,9 +366,40 @@ export function useLightboxAnimation(
       tl.to(restFade, { autoAlpha: 0, scale: 0.5, duration: 0.18, stagger: 0.03, ease: "power2.in" }, 0);
     }
 
+    // Outer crosshair expands back from scale: 0 -> 1 without fade (autoAlpha: 1) using expo.out ease
+    if (outerCrosshair) {
+      gsap.set(outerCrosshair, { autoAlpha: 1 });
+      tl.fromTo(
+        outerCrosshair,
+        { scale: 0, xPercent: -50, yPercent: -50 },
+        { scale: 1, xPercent: -50, yPercent: -50, duration: 0.95, ease: "expo.out" },
+        0.1,
+      );
+    }
+
     tl.to(overlayRef.current, { autoAlpha: 0, duration: 0.2, ease: "power2.in" }, 0);
     tl.to(lightbox, { autoAlpha: 0, duration: 0.25, ease: "power2.in" }, 0.1);
-  }, [releaseWillChange, resetVisuals, setLbOpen, stopUI, syncGalleryToIndex]);
+  }, [getOuterCrosshair, releaseWillChange, resetVisuals, setLbOpen, stopUI, syncGalleryToIndex]);
+
+  // Landing intro animation for outer gallery crosshair (scale pop with expo.out)
+  useLayoutEffect(() => {
+    const outerCrosshair = getOuterCrosshair();
+    if (!outerCrosshair) return;
+
+    gsap.set(outerCrosshair, { autoAlpha: 1 });
+    gsap.fromTo(
+      outerCrosshair,
+      { scale: 0, xPercent: -50, yPercent: -50 },
+      {
+        scale: 1,
+        xPercent: -50,
+        yPercent: -50,
+        duration: 0.95,
+        ease: "expo.out",
+        delay: 0.1,
+      },
+    );
+  }, [getOuterCrosshair]);
 
   useLayoutEffect(() => {
     const lightbox = lightboxRef.current;

@@ -121,7 +121,7 @@ export class WebGLEngine {
       heightSegments: 20,
     });
 
-    // Create CardMeshes
+    // Create CardMeshes & load ALL textures upfront immediately
     works.forEach((work, i) => {
       const baseX = i * stepDistance;
       const card = new CardMesh({
@@ -134,14 +134,8 @@ export class WebGLEngine {
         cardHeight,
         baseX,
       });
+      card.loadTexture();
       this.cardMeshes.push(card);
-    });
-
-    // Preload initial visible textures
-    this.cardMeshes.forEach((card, i) => {
-      if (Math.abs(i - this.activeIndex) <= 2) {
-        card.loadTexture();
-      }
     });
 
     this.tickerFunc = () => this.tickPhysics();
@@ -310,11 +304,6 @@ export class WebGLEngine {
       const prevIdx = this.lightboxStack.prevIdx;
 
       this.cardMeshes.forEach((card, i) => {
-        // Lazy load textures for nearby cards
-        if (Math.abs(i - this.activeIndex) <= 2 || (lbIsOpen && (i === lbIdx || Math.abs(i - lbIdx) <= 1))) {
-          card.loadTexture();
-        }
-
         card.setVelocity(this.velocity * (1 - lbProg));
 
         if (lbProg > 0.001) {
