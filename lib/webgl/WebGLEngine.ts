@@ -283,13 +283,14 @@ export class WebGLEngine {
     const absDiff = Math.abs(diff);
 
     // Lock/freeze parallax UV shift when within 0.08px of target destination to eliminate micro texture crawl
-    this.isParallaxFrozen = !this.isDragging && absDiff < 0.08;
+    if (!this.isDragging && absDiff < SETTLE_EPSILON_PX) {
+      this.stopMotion();
+    }
 
     if (absDiff < SETTLE_EPSILON_PX) {
       if (this.currentOffset !== this.targetOffset) {
         this.currentOffset = this.targetOffset;
       }
-      this.stopMotion();
       this.updateProgressAndActive();
       return;
     }
@@ -343,7 +344,20 @@ export class WebGLEngine {
 
       const offsetDelta = this.currentOffset - this._lastOffsetForVelocity;
       const instantV = offsetDelta / Math.max(dt, 0.001);
-      this.velocity += (instantV - this.velocity) * 0.12;
+
+      if (this.isDragging) {
+        // Stronger smoothing factor (0.04) during dragging to remove spiky mouse polling noise
+        this.velocity += (instantV - this.velocity) * 0.04;
+        if (Math.abs(this.velocity) < 0.05) {
+          this.velocity = 0;
+        }
+      } else {
+        // Smooth decay back to zero after pointer release
+        this.velocity += (instantV - this.velocity) * 0.12;
+        if (Math.abs(this.velocity) < 0.005) {
+          this.velocity = 0;
+        }
+      }
       this._lastOffsetForVelocity = this.currentOffset;
 
       const lbIsOpen = this.lbOpen;
