@@ -57,6 +57,7 @@ export class WebGLEngine {
   public velocity = 0;
   private _lastOffsetForVelocity = 0;
   private _lastFrameTime = 0;
+  private isParallaxFrozen = false;
   public activeIndex = 0;
   public isDragging = false;
   public dragStart = { pointerId: -1, startX: 0, startOffset: 0, didMove: false };
@@ -281,19 +282,19 @@ export class WebGLEngine {
     const diff = this.targetOffset - this.currentOffset;
     const absDiff = Math.abs(diff);
 
-    // Disable SETTLE_EPSILON_PX settling during active drag to eliminate drag micro-snap jitter
-    if (!this.isDragging && absDiff < SETTLE_EPSILON_PX) {
+    // Lock/freeze parallax UV shift when within 0.08px of target destination to eliminate micro texture crawl
+    this.isParallaxFrozen = !this.isDragging && absDiff < 0.08;
+
+    if (absDiff < SETTLE_EPSILON_PX) {
       if (this.currentOffset !== this.targetOffset) {
         this.currentOffset = this.targetOffset;
       }
       this.stopMotion();
+      this.updateProgressAndActive();
       return;
     }
 
-    let ease = this.isDragging ? DRAG_EASE : this.isReducedMotion ? 1 : IDLE_EASE;
-    if (!this.isDragging && absDiff < 1.0) {
-      ease = Math.max(ease, 0.22);
-    }
+    const ease = this.isDragging ? DRAG_EASE : this.isReducedMotion ? 1 : IDLE_EASE;
 
     this.currentOffset += diff * ease;
     this.updateProgressAndActive();
@@ -380,7 +381,8 @@ export class WebGLEngine {
           const galleryX = baseX + this.currentOffset;
           const dockX = dockSlotsX[i] ?? 0;
 
-          const galleryParallax = galleryX / (screenWidth * 0.5);
+          const activeOffset = this.isParallaxFrozen ? this.targetOffset : this.currentOffset;
+          const galleryParallax = (baseX + activeOffset) / (screenWidth * 0.5);
           const blendParallax = galleryParallax * (1 - lbProg);
 
           if (i === lbIdx) {
@@ -419,7 +421,8 @@ export class WebGLEngine {
         } else {
           const baseX = i * stepDistance;
           const meshX = baseX + this.currentOffset;
-          const parallaxX = meshX / (screenWidth * 0.5);
+          const activeOffset = this.isParallaxFrozen ? this.targetOffset : this.currentOffset;
+          const parallaxX = (baseX + activeOffset) / (screenWidth * 0.5);
 
           card.setTransform(meshX, 0, 0, scaleX, scaleY, 1.0, parallaxX);
         }
