@@ -28,27 +28,38 @@ export const fragmentShader = /* glsl */ `
   precision highp float;
 
   uniform sampler2D tMap;
-  uniform vec2 uPlaneSizes;
-  uniform vec2 uImageSizes;
+  uniform vec2 uQuadRes;
+  uniform vec2 uImageRes;
+  uniform float uScale;
   uniform float uParallaxX;
+  uniform float uMaxParallax;
   uniform float uOpacity;
 
   varying vec2 vUv;
 
   void main() {
-    // 1. Chống lỗi chia cho 0 khi Plane scale về 0 lúc đóng/mở Lightbox
-    vec2 planeSize = max(uPlaneSizes, vec2(0.001));
-    vec2 imageSize = max(uImageSizes, vec2(0.001));
+    // 1. Chống lỗi chia cho 0 khi Quad hoặc Image kích thước bằng 0
+    vec2 quadRes = max(uQuadRes, vec2(0.001));
+    vec2 imageRes = max(uImageRes, vec2(0.001));
 
-    // 2. Cover-fit chuẩn tỷ lệ 1:1 (bỏ hoàn toàn 1.15x zoom)
-    vec2 s = planeSize / imageSize;
-    float maxScale = max(s.x, s.y);
-    vec2 uvScale = planeSize / (imageSize * maxScale);
-    
+    // 2. Tính toán Aspect Ratio (Object-Fit Cover)
+    vec2 st = quadRes / imageRes;
+    float maxRatio = max(st.x, st.y);
+    vec2 coverScale = quadRes / (imageRes * maxRatio);
+
+    // 3. Tỷ lệ zoom an toàn uScale tạo biên độ cho hiệu ứng Parallax
+    float safeScale = max(uScale, 1.0);
+    vec2 uvScale = coverScale / safeScale;
+
     vec2 uv = (vUv - 0.5) * uvScale + 0.5;
-    
-    // 3. Parallax shift trực tiếp
-    uv.x += uParallaxX * 0.12;
+
+    // 4. Khống chế Parallax X theo biên độ an toàn uMaxParallax
+    float marginX = (1.0 - 1.0 / safeScale) / 2.0;
+    float shiftX = uParallaxX * uMaxParallax;
+
+    // Giữ UV không vượt khỏi khoảng an toàn [marginX, 1.0 - marginX]
+    uv.x = clamp(uv.x + shiftX, marginX, 1.0 - marginX);
+    uv.y = clamp(uv.y, 0.0, 1.0);
 
     vec4 color = texture2D(tMap, uv);
     color.a *= uOpacity;

@@ -11,6 +11,7 @@ export interface CardMeshOptions {
   cardWidth: number;
   cardHeight: number;
   baseX: number;
+  uScale?: number;
 }
 
 
@@ -22,6 +23,7 @@ export class CardMesh {
   public baseX: number;
   public cardWidth: number;
   public cardHeight: number;
+  public uScale: number;
   public isTextureLoaded = false;
   public isTextureLoading = false;
 
@@ -30,13 +32,16 @@ export class CardMesh {
   private currentImage: HTMLImageElement | null = null;
 
   constructor(options: CardMeshOptions) {
-    const { gl, geometry, parent, index, src, cardWidth, cardHeight, baseX } = options;
+    const { gl, geometry, parent, index, src, cardWidth, cardHeight, baseX, uScale = 1.25 } = options;
 
     this.index = index;
     this.src = src;
     this.baseX = baseX;
     this.cardWidth = cardWidth;
     this.cardHeight = cardHeight;
+    this.uScale = uScale;
+
+    const margin = (1.0 - 1.0 / Math.max(this.uScale, 1.0)) / 2.0;
 
     this.texture = new Texture(gl, {
       generateMipmaps: false,
@@ -52,9 +57,11 @@ export class CardMesh {
       fragment: fragmentShader,
       uniforms: {
         tMap: { value: this.texture },
-        uPlaneSizes: { value: new Float32Array([cardWidth, cardHeight]) },
-        uImageSizes: { value: new Float32Array([800, 1000]) },
+        uQuadRes: { value: new Float32Array([cardWidth, cardHeight]) },
+        uImageRes: { value: new Float32Array([800, 1000]) },
+        uScale: { value: this.uScale },
         uParallaxX: { value: 0 },
+        uMaxParallax: { value: margin },
         uVelocity: { value: 0 },
         uOpacity: { value: 1.0 },
         uOffsetZ: { value: 0.0 },
@@ -66,6 +73,13 @@ export class CardMesh {
     this.mesh = new Mesh(gl, { geometry, program: this.program });
     this.mesh.position.set(baseX, 0, 0);
     this.mesh.setParent(parent);
+  }
+
+  public updateParallaxBounds() {
+    const safeScale = Math.max(this.uScale, 1.0);
+    const margin = (1.0 - 1.0 / safeScale) / 2.0;
+    this.program.uniforms.uScale.value = safeScale;
+    this.program.uniforms.uMaxParallax.value = Math.max(0, margin);
   }
 
   public loadTexture() {
@@ -83,8 +97,9 @@ export class CardMesh {
       "load",
       () => {
         this.texture.image = img;
-        this.program.uniforms.uImageSizes.value[0] = img.naturalWidth || 800;
-        this.program.uniforms.uImageSizes.value[1] = img.naturalHeight || 1000;
+        this.program.uniforms.uImageRes.value[0] = img.naturalWidth || 800;
+        this.program.uniforms.uImageRes.value[1] = img.naturalHeight || 1000;
+        this.updateParallaxBounds();
         this.isTextureLoaded = true;
         this.isTextureLoading = false;
         this.currentImage = null;
@@ -107,8 +122,9 @@ export class CardMesh {
     this.cardWidth = cardWidth;
     this.cardHeight = cardHeight;
     this.baseX = baseX;
-    this.program.uniforms.uPlaneSizes.value[0] = cardWidth;
-    this.program.uniforms.uPlaneSizes.value[1] = cardHeight;
+    this.program.uniforms.uQuadRes.value[0] = cardWidth;
+    this.program.uniforms.uQuadRes.value[1] = cardHeight;
+    this.updateParallaxBounds();
   }
 
   public setTransform(
@@ -125,12 +141,12 @@ export class CardMesh {
 
     this.program.uniforms.uOpacity.value = opacity;
 
-    const clampedParallax = Math.min(Math.max(parallaxX, -1.2), 1.2);
+    const clampedParallax = Math.min(Math.max(parallaxX, -1.0), 1.0);
     this.program.uniforms.uParallaxX.value = clampedParallax;
 
-    const uPlane = this.program.uniforms.uPlaneSizes.value;
-    uPlane[0] = this.cardWidth * scaleX;
-    uPlane[1] = this.cardHeight * scaleY;
+    const uQuad = this.program.uniforms.uQuadRes.value;
+    uQuad[0] = this.cardWidth * scaleX;
+    uQuad[1] = this.cardHeight * scaleY;
   }
 
   public setVelocity(v: number) {

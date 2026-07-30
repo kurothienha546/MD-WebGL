@@ -372,8 +372,8 @@ export class WebGLEngine {
       const prevIdx = this.lightboxStack.prevIdx;
 
       this.cardMeshes.forEach((card, i) => {
-      const cardV = Math.min(Math.max(this.velocity * (1 - lbProg), -10), 10);
-      card.setVelocity(cardV);
+        const cardV = Math.min(Math.max(this.velocity * (1 - lbProg), -10), 10);
+        card.setVelocity(cardV);
 
         if (lbProg > 0.001) {
           const baseX = i * stepDistance;
