@@ -12,6 +12,7 @@ export interface CardMeshOptions {
   cardHeight: number;
   baseX: number;
   uScale?: number;
+  parallaxSensitivity?: number;
 }
 
 
@@ -24,6 +25,7 @@ export class CardMesh {
   public cardWidth: number;
   public cardHeight: number;
   public uScale: number;
+  public parallaxSensitivity: number;
   public isTextureLoaded = false;
   public isTextureLoading = false;
 
@@ -32,7 +34,18 @@ export class CardMesh {
   private currentImage: HTMLImageElement | null = null;
 
   constructor(options: CardMeshOptions) {
-    const { gl, geometry, parent, index, src, cardWidth, cardHeight, baseX, uScale = 1.25 } = options;
+    const {
+      gl,
+      geometry,
+      parent,
+      index,
+      src,
+      cardWidth,
+      cardHeight,
+      baseX,
+      uScale = 1.08,
+      parallaxSensitivity = 0.6,
+    } = options;
 
     this.index = index;
     this.src = src;
@@ -40,6 +53,7 @@ export class CardMesh {
     this.cardWidth = cardWidth;
     this.cardHeight = cardHeight;
     this.uScale = uScale;
+    this.parallaxSensitivity = parallaxSensitivity;
 
     const margin = (1.0 - 1.0 / Math.max(this.uScale, 1.0)) / 2.0;
 
@@ -141,7 +155,7 @@ export class CardMesh {
 
     this.program.uniforms.uOpacity.value = opacity;
 
-    const clampedParallax = Math.min(Math.max(parallaxX, -1.0), 1.0);
+    const clampedParallax = Math.min(Math.max(parallaxX * this.parallaxSensitivity, -1.0), 1.0);
     this.program.uniforms.uParallaxX.value = clampedParallax;
 
     const uQuad = this.program.uniforms.uQuadRes.value;

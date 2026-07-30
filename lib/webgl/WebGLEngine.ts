@@ -598,8 +598,8 @@ export class WebGLEngine {
           }
         }
 
-        const MOMENTUM_MULTIPLIER = 0.20;
-        const maxGlide = this.metrics.stepDistance * 1.5;
+        const MOMENTUM_MULTIPLIER = 0.10;
+        const maxGlide = this.metrics.stepDistance * 0.75;
         const glideDelta = Math.min(Math.max(velocity * MOMENTUM_MULTIPLIER, -maxGlide), maxGlide);
 
         this.setMotionTarget(this.currentOffset + glideDelta);
