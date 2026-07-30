@@ -39,8 +39,10 @@ export class CardMesh {
     this.cardHeight = cardHeight;
 
     this.texture = new Texture(gl, {
-      generateMipmaps: true,
-      minFilter: gl.LINEAR_MIPMAP_LINEAR,
+      generateMipmaps: false,
+      wrapS: gl.CLAMP_TO_EDGE,
+      wrapT: gl.CLAMP_TO_EDGE,
+      minFilter: gl.LINEAR,
       magFilter: gl.LINEAR,
       anisotropy: 16,
     });
