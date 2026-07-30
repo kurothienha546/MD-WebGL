@@ -63,7 +63,6 @@ export class CardMesh {
       wrapT: gl.CLAMP_TO_EDGE,
       minFilter: gl.LINEAR,
       magFilter: gl.LINEAR,
-      anisotropy: 16,
     });
 
     this.program = new Program(gl, {
